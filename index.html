@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fakturamatch</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --concrete:#E7EAE6; --panel:#FFFFFF; --ink:#14201A; --ink2:#5A6660;
+    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --pant:#2E7D5B; --warn:#A8412C;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--concrete);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 18px 80px}
+
+  .masthead{border-bottom:3px solid var(--ink);padding-bottom:14px;margin-bottom:26px}
+  .masthead h1{font-size:clamp(30px,7vw,52px);line-height:.92;margin:0;font-weight:800;
+               letter-spacing:-.035em;text-transform:uppercase}
+  .masthead p{margin:8px 0 0;color:var(--ink2);max-width:48ch;font-size:14px}
+
+  .stage{background:var(--panel);border:1px solid var(--line);margin-bottom:18px}
+  .stage-head{display:flex;align-items:baseline;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .stage-num{font-family:var(--mono);font-size:12px;font-weight:700;background:var(--ink);
+             color:var(--hiviz);padding:3px 7px;letter-spacing:.05em}
+  .stage-title{font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:13px}
+  .stage-note{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink2);text-align:right}
+  .stage-body{padding:18px}
+
+  button{font-family:var(--sans);font-size:13px;font-weight:700;text-transform:uppercase;
+         letter-spacing:.06em;background:var(--ink);color:#fff;border:1px solid var(--ink);
+         padding:10px 16px;cursor:pointer}
+  button:hover{background:#28382F}
+  button:focus-visible{outline:3px solid var(--hiviz);outline-offset:2px}
+  button.ghost{background:transparent;color:var(--ink)}
+  button.ghost:hover{background:var(--concrete)}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+
+  .drop{border:2px dashed var(--line);padding:30px 20px;text-align:center;cursor:pointer;
+        transition:border-color .12s, background .12s}
+  .drop:hover,.drop.hot{border-color:var(--ink);background:#F5F7F4}
+  .drop strong{display:block;font-size:15px;margin-bottom:4px}
+  .drop span{color:var(--ink2);font-size:13px}
+
+  textarea{width:100%;min-height:110px;padding:10px;font-family:var(--mono);font-size:12px;
+           border:1px solid var(--line);background:#FAFBF9;color:var(--ink);resize:vertical}
+  textarea:focus{outline:2px solid var(--hiviz);outline-offset:-1px}
+
+  .map{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:4px}
+  .map label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+             color:var(--ink2);font-weight:700;margin-bottom:5px}
+  .map select{width:100%;padding:8px;border:1px solid var(--line);background:#fff;
+              font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+  .diag{margin-top:18px;border-left:3px solid var(--hiviz);background:#F5F7F4;padding:14px 16px}
+  .diag h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink2)}
+  .diag ul{margin:0;padding-left:18px;font-size:13px}
+  .diag li{margin-bottom:3px}
+  .diag code{font-family:var(--mono);font-size:12px;background:#fff;padding:1px 4px;border:1px solid var(--line)}
+
+  .files{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+  .file{display:flex;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;
+        border:1px solid var(--line);padding:8px 10px}
+  .file .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file .st{color:var(--ink2)}
+  .file .st.bad{color:var(--warn);font-weight:700}
+
+  .readout{background:var(--ink);color:#fff;display:flex;align-items:center;gap:22px;padding:20px 22px}
+  .readout .big{font-family:var(--mono);font-weight:700;font-size:clamp(42px,12vw,68px);
+                line-height:1;color:var(--hiviz)}
+  .readout .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.14em;opacity:.65;line-height:1.4}
+  .readout .lbl b{display:block;font-size:13px;letter-spacing:.06em;opacity:1;color:#fff;font-weight:700}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+           color:var(--ink2);padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:9px 10px;border-bottom:1px solid #EDF0EC;vertical-align:top}
+  tbody tr:hover{background:#F7F9F6}
+  tbody tr.risky{background:#FDF9EE}
+  tbody tr.risky:hover{background:#FAF4E2}
+  .num{font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .ctx{font-family:var(--mono);font-size:11px;color:var(--ink2);max-width:280px;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;
+        letter-spacing:.08em;padding:2px 6px;color:#fff}
+  .chip.slf{background:var(--slf)}
+  .chip.pant{background:var(--pant)}
+  .chip.none{background:transparent;color:var(--ink2);border:1px solid var(--line);font-weight:400}
+  .flag{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;
+        background:#E8A33D;color:#3A2A08;padding:1px 5px;margin-left:6px;letter-spacing:.06em}
+  button.del{background:transparent;color:var(--ink2);border:1px solid var(--line);
+             padding:2px 8px;font-size:15px;line-height:1.2;letter-spacing:0}
+  button.del:hover{background:var(--warn);border-color:var(--warn);color:#fff}
+  .tablescroll{overflow-x:auto;margin:0 -18px;padding:0 18px}
+
+  .empty{padding:34px 18px;text-align:center;color:var(--ink2);font-size:14px}
+  .msg{font-size:13px;padding:11px 13px;margin-top:14px;border-left:3px solid var(--warn);background:#FBF3F1}
+  .msg.info{border-left-color:var(--ink2);background:#F5F7F4}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);
+         color:var(--hiviz);font-family:var(--mono);font-size:12px;padding:11px 18px;opacity:0;
+         pointer-events:none;transition:opacity .18s;z-index:50}
+  .toast.on{opacity:1}
+  .hide{display:none!important}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>Fakturamatch</h1>
+    <p>Slipp inn en faktura. Varer som finnes i varelisten hentes ut, merket med SLF eller pant.</p>
+  </div>
+
+  <section class="stage">
+    <div class="stage-head">
+      <span class="stage-num">01</span><span class="stage-title">Vareliste</span>
+      <span class="stage-note" id="listNote">Ingen liste lastet</span>
+    </div>
+    <div class="stage-body">
+      <div class="drop" id="listDrop">
+        <strong>Slipp Excel-fil her</strong>
+        <span>.xlsx, .xls eller .csv — første rad må være kolonneoverskrifter</span>
+      </div>
+      <input type="file" id="listInput" accept=".xlsx,.xls,.csv" class="hide">
+
+      <div id="mapArea" class="hide">
+        <div class="map" style="margin-top:20px">
+          <div><label for="colArt">Varenummer (søkes etter i fakturaen)</label><select id="colArt"></select></div>
+          <div><label for="colName">Artikkel</label><select id="colName"></select></div>
+          <div><label for="colMiljo">Miljøavgiftsprofil</label><select id="colMiljo"></select></div>
+          <div><label for="colStat">Statistikknavn</label><select id="colStat"></select></div>
+        </div>
+        <div id="diag"></div>
+        <div class="btnrow">
+          <button id="saveList">Lagre vareliste</button>
+          <button class="ghost" id="clearList">Fjern lagret liste</button>
+        </div>
+      </div>
+      <div id="listMsg"></div>
+    </div>
+  </section>
+
+  <section class="stage">
+    <div class="stage-head">
+      <span class="stage-num">02</span><span class="stage-title">Faktura</span>
+      <span class="stage-note" id="invNote">Ingen faktura lest</span>
+    </div>
+    <div class="stage-body">
+      <div class="drop" id="invDrop">
+        <strong>Slipp faktura her</strong>
+        <span>PDF. Flere filer samtidig går fint.</span>
+      </div>
+      <input type="file" id="invInput" accept=".pdf" multiple class="hide">
+      <div class="files" id="fileList"></div>
+      <div class="btnrow"><button class="ghost" id="resetInv">Tøm og start på nytt</button></div>
+
+      <details style="margin-top:16px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--ink2)">Eller lim inn teksten manuelt</summary>
+        <textarea id="pasteBox" placeholder="Marker alt i PDF-en (Ctrl+A), kopier, og lim inn her." style="margin-top:10px"></textarea>
+        <div class="btnrow"><button class="ghost" id="usePaste">Bruk innlimt tekst</button></div>
+      </details>
+      <div id="invMsg"></div>
+    </div>
+  </section>
+
+  <section class="stage">
+    <div class="stage-head"><span class="stage-num">03</span><span class="stage-title">Treff</span></div>
+    <div class="readout">
+      <div class="big" id="hitCount">0</div>
+      <div class="lbl"><b id="hitLabel">Ingen søk kjørt</b><span id="hitSub">Last inn vareliste og faktura</span></div>
+    </div>
+    <div class="stage-body">
+      <div id="resultArea"><div class="empty">Treffene vises her.</div></div>
+      <div class="btnrow hide" id="outBtns">
+        <button id="copyTab">Kopier for Excel</button>
+        <button class="ghost" id="copyText">Kopier som tekst</button>
+        <button class="ghost" id="mailIt">Kopier tabell + e-post</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let listRows = [], headers = [], mapping = {art:'', name:'', miljo:'', stat:''};
+let invoiceLines = [], invoiceLineSrc = [], invoicePages = [], invoiceSources = [], matches = [], unmatched = [];
+let removedKeys = new Set();
+
+const $ = id => document.getElementById(id);
+const norm = s => String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const esc = s => String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function toast(t){
+  const el = $('toast'); el.textContent = t; el.classList.add('on');
+  clearTimeout(el._t); el._t = setTimeout(()=>el.classList.remove('on'), 1900);
+}
+function note(where, html, kind){
+  $(where).innerHTML = html ? '<div class="msg '+(kind||'')+'">'+html+'</div>' : '';
+}
+
+/* miljøavgiftsprofil: 10 = SLF, 1 = pant, alt annet = ingenting */
+function status(v){
+  const s = String(v == null ? '' : v).trim();
+  if (s === '10') return 'SLF';
+  if (s === '1')  return 'Pant';
+  return '';
+}
+
+/* storage: localStorage when self-hosted, sandbox API as fallback */
+const store = {
+  async get(k){
+    try{ const v = window.localStorage.getItem(k); if (v != null) return {value:v}; }catch(e){}
+    try{ return await window.storage.get(k); }catch(e){ return null; }
+  },
+  async set(k, v){
+    try{ window.localStorage.setItem(k, v); return true; }catch(e){}
+    try{ await window.storage.set(k, v); return true; }catch(e){ return false; }
+  },
+  async del(k){
+    try{ window.localStorage.removeItem(k); }catch(e){}
+    try{ await window.storage.delete(k); }catch(e){}
+  }
+};
+
+async function save(){
+  const cols = [mapping.art, mapping.name, mapping.miljo, mapping.stat].filter(Boolean);
+  const slim = listRows.map(r => { const o={}; cols.forEach(c => o[c]=r[c]); return o; });
+  return await store.set('fakturamatch:v2', JSON.stringify({headers, mapping, rows:slim}));
+}
+
+/* ---------------- master list ---------------- */
+function wireDrop(dropEl, inputEl, handler){
+  dropEl.addEventListener('click', ()=>inputEl.click());
+  dropEl.addEventListener('dragover', e=>{e.preventDefault();dropEl.classList.add('hot')});
+  dropEl.addEventListener('dragleave', ()=>dropEl.classList.remove('hot'));
+  dropEl.addEventListener('drop', e=>{
+    e.preventDefault(); dropEl.classList.remove('hot');
+    if (e.dataTransfer.files.length) handler([...e.dataTransfer.files]);
+  });
+  inputEl.addEventListener('change', ()=>{
+    if (inputEl.files.length) handler([...inputEl.files]);
+    inputEl.value = '';
+  });
+}
+
+async function readList(files){
+  note('listMsg','');
+  const file = files[0];
+  try{
+    const wb = XLSX.read(await file.arrayBuffer(), {type:'array'});
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:'', raw:false});
+    if (!rows.length) throw new Error('Arket er tomt.');
+    listRows = rows; headers = Object.keys(rows[0]);
+    mapping = {art:'', name:'', miljo:'', stat:''};
+    buildMapUI();
+    $('listNote').textContent = rows.length + ' rader · ' + file.name;
+  }catch(err){
+    note('listMsg','Fikk ikke lest filen: '+err.message);
+  }
+}
+
+function guess(cands){
+  for (const c of cands){
+    const h = headers.find(x => x.toLowerCase().replace(/[^a-zæøå0-9]/g,'').includes(c));
+    if (h) return h;
+  }
+  return '';
+}
+
+function buildMapUI(){
+  const opts = c => '<option value="">— velg —</option>' +
+    headers.map(h=>'<option value="'+h.replace(/"/g,'&quot;')+'"'+(h===c?' selected':'')+'>'+h+'</option>').join('');
+  mapping.art   = mapping.art   || guess(['artnrhovedlev','hovedlev','varenummer','artikkelnummer','artnr']);
+  mapping.name  = mapping.name  || guess(['artikkel','varenavn','navn','beskrivelse']);
+  mapping.miljo = mapping.miljo || guess(['miljøavgift','miljoavgift','avgiftsprofil','miljø']);
+  mapping.stat  = mapping.stat  || guess(['statistikknavn','statistikk','varenummerstat','tolltariff']);
+  $('colArt').innerHTML   = opts(mapping.art);
+  $('colName').innerHTML  = opts(mapping.name);
+  $('colMiljo').innerHTML = opts(mapping.miljo);
+  $('colStat').innerHTML  = opts(mapping.stat);
+  $('mapArea').classList.remove('hide');
+  diagnose();
+}
+
+function readMapUI(){
+  mapping.art = $('colArt').value;
+  mapping.name = $('colName').value;
+  mapping.miljo = $('colMiljo').value;
+  mapping.stat = $('colStat').value;
+  diagnose();
+}
+
+/* Report what in the list can and cannot be matched, before anything is run. */
+function diagnose(){
+  if (!mapping.art){ $('diag').innerHTML=''; return; }
+  const blank = [], tooShort = [], risky = [];
+  let slf = 0, pant = 0;
+  for (const r of listRows){
+    const n = norm(r[mapping.art]);
+    if (!n) blank.push(r[mapping.name] || '(uten navn)');
+    else if (n.length < 3) tooShort.push(n);
+    else if (n.length === 3) risky.push(n);
+    const st = mapping.miljo ? status(r[mapping.miljo]) : '';
+    if (st === 'SLF') slf++; else if (st === 'Pant') pant++;
+  }
+  const uniq = a => [...new Set(a)];
+  let li = '<li><strong>'+listRows.length+'</strong> varer i listen'+
+           (mapping.miljo ? ' — '+slf+' merket SLF, '+pant+' merket pant' : '')+'</li>';
+  if (blank.length)
+    li += '<li><strong>'+blank.length+'</strong> uten varenummer — disse kan <em>aldri</em> bli funnet: '+
+          esc(uniq(blank).slice(0,8).join(', '))+(blank.length>8?' …':'')+'</li>';
+  if (tooShort.length)
+    li += '<li><strong>'+tooShort.length+'</strong> hoppes over (under 3 tegn, gir falske treff): <code>'+
+          esc(uniq(tooShort).join('</code> <code>'))+'</code></li>';
+  if (risky.length)
+    li += '<li><strong>'+risky.length+'</strong> korte numre blir <em>flagget</em> ved treff, sjekk dem selv: <code>'+
+          esc(uniq(risky).join('</code> <code>'))+'</code></li>';
+  $('diag').innerHTML = '<div class="diag"><h4>Slik ser listen ut</h4><ul>'+li+'</ul></div>';
+}
+
+/* ---------------- invoice ---------------- */
+/* Pull the invoice number out of the header. Layouts differ: some suppliers put
+   the value on the same line as the label, others put it on the following line
+   next to the customer number. Falls back to the file name. */
+const INV_LBL = /(invoice\s*no|invoice\s*number|fakturanr|faktura\s*nr)\b[.:]?/i;
+function invoiceNumber(lines){
+  for (let i=0;i<lines.length;i++){
+    const m = INV_LBL.exec(lines[i]);
+    if (!m) continue;
+    const pick = t => (String(t).match(/[A-Z0-9][A-Z0-9\/\-]{3,}/gi) || [])
+      .filter(x => /\d/.test(x) && !/^(customer|kunde|order|page|date)/i.test(x));
+    let c = pick(lines[i].slice(m.index + m[0].length));
+    if (c.length) return c[0];
+    for (const nxt of lines.slice(i+1, i+4)){
+      c = pick(nxt);
+      if (c.length) return c[0];
+    }
+  }
+  return '';
+}
+/* Rebuild real lines from pdf.js by grouping text items on their y-coordinate,
+   so each match can be shown with the invoice line it came from. */
+async function pdfPages(file){
+  const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++){
+    const out = [];
+    const tc = await (await pdf.getPage(p)).getTextContent();
+    // Cluster items by vertical position. Fixed-width buckets split a row whenever
+    // it straddles a boundary, which detached article numbers from their descriptions.
+    const items = tc.items.filter(i=>i.str.trim())
+      .map(i=>({x:i.transform[4], y:i.transform[5], s:i.str}))
+      .sort((a,b)=> b.y - a.y || a.x - b.x);
+    const groups = [];
+    for (const it of items){
+      const g = groups[groups.length-1];
+      if (g && Math.abs(g.y - it.y) <= 4) g.items.push(it);
+      else groups.push({y: it.y, items: [it]});
+    }
+    for (const g of groups){
+      out.push(g.items.sort((a,b)=>a.x-b.x).map(i=>i.s).join(' ').replace(/\s+/g,' ').trim());
+    }
+    pages.push(out.filter(Boolean));
+  }
+  return pages;
+}
+
+async function readInvoices(files){
+  note('invMsg','');
+  for (const file of files){
+    if (invoiceSources.includes(file.name)){
+      note('invMsg','<strong>'+esc(file.name)+'</strong> er allerede lest.','info');
+      continue;
+    }
+    const row = document.createElement('div');
+    row.className = 'file';
+    row.innerHTML = '<span class="nm"></span><span class="st">leser…</span>';
+    row.querySelector('.nm').textContent = file.name;
+    $('fileList').appendChild(row);
+    const st = row.querySelector('.st');
+    try{
+      const pages = await pdfPages(file);
+      const lines = pages.flat();
+      if (!lines.join('').trim()){
+        st.textContent = 'ingen tekst — skannet?'; st.className = 'st bad';
+        note('invMsg','<strong>'+esc(file.name)+'</strong> inneholder ingen tekst. Den er sannsynligvis skannet — lim inn teksten manuelt, eller be leverandøren om en PDF med søkbar tekst.');
+        continue;
+      }
+      const label = invoiceNumber(lines) || file.name.replace(/\.pdf$/i,'');
+      invoiceLines = invoiceLines.concat(lines);
+      invoiceLineSrc = invoiceLineSrc.concat(lines.map(()=>label));
+      invoicePages = invoicePages.concat(pages);
+      invoiceSources.push(label);
+      st.textContent = 'fakturanr ' + label + ' · ' + lines.length + ' linjer';
+    }catch(err){
+      st.textContent = 'feilet'; st.className = 'st bad';
+      note('invMsg','Fikk ikke lest <strong>'+esc(file.name)+'</strong>: '+esc(err.message));
+    }
+  }
+  $('invNote').textContent = invoiceSources.length + ' fil(er) lest';
+  run();
+}
+
+/* ---------------- matching ---------------- */
+/* Exact token match only. No stitching of adjacent tokens: on real invoices that
+   invented ~90 extra number-like strings per page out of prices and discounts. */
+/* Invoice lines that look like line items: first token contains a digit and is
+   followed by actual words. Narrowed to the region between the column header and
+   the totals, which keeps addresses, bank details and dates out. */
+// Header of the line-item table. Either an explicit article-number column, or the
+// generic shape of one: a description column and a quantity column on the same line.
+// Some layouts head that column only "No.", which no keyword list would catch.
+const DESC = 'description|denomination|beskrivelse|varetekst|artikkel';
+const QTY  = 'quantity|qty|antall|delivered|levert';
+const HDR  = new RegExp('(article\\s*no|varenr|art\\.?\\s*nr|artikkelnr)|((' + DESC +
+                        ').*(' + QTY + ')|(' + QTY + ').*(' + DESC + '))', 'i');
+const STOP = /net\s+to\s+pay|payment made|å betale|sum eks|exportören|vat directive|iban|bank giro|corporate identity/i;
+
+let itemLineSet = new Set();
+function candidateLines(pages){
+  const out = [];
+  itemLineSet = new Set();
+  for (const lines of pages){
+    let start = -1;
+    for (let i=0;i<lines.length;i++){ if (HDR.test(lines[i])){ start = i+1; break; } }
+    if (start < 0) continue;                 // no column header on this page = no line items
+    let stop = lines.length;
+    for (let i=start;i<lines.length;i++){ if (STOP.test(lines[i])){ stop = i; break; } }
+    for (const l of lines.slice(start, stop)){
+      const toks = l.split(/\s+/).filter(Boolean);
+      if (!toks.length) continue;
+      const first = toks[0].replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+    if (!first || !/\d/.test(first) || first.length < 3 || first.length > 12) continue;
+    if (!/[A-Za-zÀ-ÿ]{3,}/.test(toks.slice(1).join(' '))) continue;
+    out.push({key:first, line:l.trim()});
+      itemLineSet.add(l);
+    }
+  }
+  return out;
+}
+
+function run(){
+  if (!listRows.length || !invoiceLines.length) return;
+  if (!mapping.art){ note('listMsg','Velg hvilken kolonne som inneholder varenummeret.'); return; }
+
+  const index = new Map();
+  invoiceLines.forEach((line, i) => {
+    for (const t of line.split(/[^A-Za-z0-9]+/)){
+      if (!t) continue;
+      const k = t.toUpperCase();
+      if (!index.has(k)) index.set(k, i);
+    }
+    // A hyphen inside one unbroken word is part of the number, so join across it.
+    // Joining across spaces is NOT done: that invents numbers out of prices and discounts.
+    for (const w of line.split(/\s+/)){
+      const clean = w.replace(/^[.,;:()]+|[.,;:()]+$/g,'');
+      if (clean.indexOf('-') < 0) continue;
+      if (/^\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}$/.test(clean)) continue;   // dates
+      const k = norm(clean);
+      if (k && !index.has(k)) index.set(k, i);
+    }
+  });
+
+  const cands = candidateLines(invoicePages);
+  matches = [];
+  const listKeys = new Set();
+  for (const r of listRows){ const k = norm(r[mapping.art]); if (k) listKeys.add(k); }
+  const seenMiss = new Set();
+  unmatched = cands.filter(c=>{
+    if (listKeys.has(c.key) || seenMiss.has(c.key)) return false;
+    seenMiss.add(c.key); return true;
+  });
+  for (const r of listRows){
+    const n = norm(r[mapping.art]);
+    if (n.length < 3) continue;
+    if (!index.has(n)) continue;
+    const ln = invoiceLines[index.get(n)] || '';
+    const lead = norm((ln.split(/\s+/)[0]) || '');
+    matches.push({
+      inv:  invoiceLineSrc[index.get(n)] || '',
+      art:  r[mapping.art],
+      name: mapping.name  ? r[mapping.name]  : '',
+      code: mapping.miljo ? String(r[mapping.miljo]||'').trim() : '',
+      stat: mapping.miljo ? status(r[mapping.miljo]) : '',
+      stk:  mapping.stat  ? String(r[mapping.stat]||'').trim() : '',
+      ctx:  ln,
+      risky: n.length === 3,
+      offline: itemLineSet.size > 0 && !itemLineSet.has(ln) && lead !== n
+    });
+  }
+  render();
+}
+
+function render(){
+  const vis = visible();
+  const nRemoved = matches.length - vis.length;
+
+  $('hitCount').textContent = vis.length;
+  $('hitLabel').textContent = vis.length === 1 ? 'vare funnet' : 'varer funnet';
+  $('hitSub').textContent = 'av ' + listRows.length + ' i varelisten \u00b7 faktura ' +
+                            (invoiceSources.join(', ') || 'innlimt tekst');
+  $('outBtns').classList.toggle('hide', vis.length === 0);
+
+  const missHtml = !unmatched.length ? '' :
+    '<div class="diag" style="border-left-color:#E8A33D;margin-top:18px"><h4>'+unmatched.length+
+    ' varelinje(r) p\u00e5 fakturaen finnes ikke i varelisten</h4><ul>'+
+    unmatched.map(u=>'<li><code>'+esc(u.key)+'</code> '+esc(u.line.slice(0,80))+'</li>').join('')+
+    '</ul><p style="margin:10px 0 0;font-size:13px">Er dette nye varer som mangler i Excel-lista, '+
+    'eller bare frakt og emballasje? Nye varer m\u00e5 legges inn, ellers blir de aldri med i utskriften.</p></div>';
+
+  const undoHtml = !nRemoved ? '' :
+    '<div class="msg info">'+nRemoved+' rad(er) er fjernet og tas ikke med i utskriften. '+
+    '<button class="ghost" id="undoDel" style="padding:4px 10px;margin-left:8px">Angre</button></div>';
+
+  if (!vis.length){
+    $('resultArea').innerHTML =
+      '<div class="empty">'+(nRemoved ? 'Alle radene er fjernet.'
+                                      : 'Ingen av varene i listen ble funnet i denne fakturaen.')+'</div>'+
+      undoHtml + missHtml;
+    return;
+  }
+
+  const chip = m => m.stat === 'SLF'  ? '<span class="chip slf">SLF</span>'
+                  : m.stat === 'Pant' ? '<span class="chip pant">PANT</span>'
+                  : '<span class="chip none">\u2013</span>';
+
+  const rows = vis.map(m =>
+    '<tr class="'+((m.risky||m.offline)?'risky':'')+'">'+
+    '<td class="num">'+esc(m.inv)+'</td>'+
+    '<td class="num">'+esc(m.art)+((m.risky||m.offline)?'<span class="flag">SJEKK</span>':'')+'</td>'+
+    '<td>'+esc(m.name)+'</td>'+
+    '<td class="num">'+esc(m.code)+'</td>'+
+    '<td class="num">'+esc(m.stk)+'</td>'+
+    '<td>'+chip(m)+'</td>'+
+    '<td class="ctx" title="'+esc(m.ctx)+'">'+esc(m.ctx)+'</td>'+
+    '<td><button class="del" data-key="'+esc(rowKey(m))+'" title="Fjern denne raden">&times;</button></td>'+
+    '</tr>').join('');
+
+  const nRisky = vis.filter(m=>m.risky||m.offline).length;
+  const nOff   = vis.filter(m=>m.offline).length;
+
+  $('resultArea').innerHTML =
+    '<div class="tablescroll"><table><thead><tr>'+
+    '<th>Faktura</th><th>Varenummer</th><th>Artikkel</th><th>Milj\u00f8avgift</th>'+
+    '<th>Statistikknavn</th><th>Status</th><th>Funnet i denne linjen</th><th></th>'+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    undoHtml + missHtml +
+    (nRisky ? '<div class="msg">'+nRisky+' treff er merket <strong>SJEKK</strong>'+
+      (nOff ? ' \u2014 '+nOff+' av dem ble funnet p\u00e5 en linje som ikke ser ut som en varelinje '+
+              '(f.eks. vekt, sum eller adresse)' : ' fordi varenummeret er kort')+
+      '. Se p\u00e5 linjen til h\u00f8yre og vurder om treffet er ekte.</div>' : '');
+}
+
+/* ---------------- output ---------------- */
+const rowKey = m => m.inv + '\u0001' + m.art;
+const visible = () => matches.filter(m => !removedKeys.has(rowKey(m)));
+const HEAD = ['Faktura','Varenummer','Artikkel','Miljøavgift','Statistikknavn','Status'];
+const dateNO = () => new Date().toLocaleDateString('nb-NO',
+      {day:'2-digit', month:'2-digit', year:'numeric'});
+const headerLine = () => { const n = visible().length;
+  return 'Faktura ' + (invoiceSources.join(', ') || 'innlimt tekst') +
+         ' \u00b7 ' + n + (n === 1 ? ' vare' : ' varer') + ' \u00b7 ' + dateNO(); };
+const asTab  = () => [HEAD.join('\t'), ...visible().map(m=>[m.inv,m.art,m.name,m.code,m.stk,m.stat||'-'].join('\t'))].join('\n');
+const asText = () => headerLine() + '\n\n' +
+  visible().map(m => m.inv+' | '+m.art+' | '+m.name+' | '+(m.stk||'-')+' | '+(m.stat||'-')).join('\n');
+
+/* A formatted table for pasting into an email. Email clients strip <style> blocks,
+   so every rule has to be an inline attribute on the element itself. */
+function asHtmlTable(){
+  const B = '1px solid #c9d0ca';
+  const th = t => '<th style="border:'+B+';background:#14201a;color:#fff;padding:6px 9px;'+
+                  'text-align:left;font-size:12px">'+esc(t)+'</th>';
+  const td = (t,mono) => '<td style="border:'+B+';padding:6px 9px;font-size:13px'+
+                  (mono?';font-family:Consolas,monospace':'')+'">'+esc(t)+'</td>';
+  const badge = m =>
+      m.stat === 'SLF'  ? '<span style="background:#1b4d8f;color:#fff;padding:2px 7px;font-size:11px;font-weight:bold">SLF</span>'
+    : m.stat === 'Pant' ? '<span style="background:#2e7d5b;color:#fff;padding:2px 7px;font-size:11px;font-weight:bold">PANT</span>'
+    : '<span style="color:#5a6660">\u2013</span>';
+
+  const head = ['Faktura','Varenummer','Artikkel','Milj\u00f8avgift','Statistikknavn','Status'].map(th).join('');
+  const rows = visible().map(m =>
+    '<tr>'+td(m.inv,1)+td(m.art,1)+td(m.name)+td(m.code,1)+td(m.stk,1)+
+    '<td style="border:'+B+';padding:6px 9px">'+badge(m)+'</td></tr>').join('');
+
+  return '<div style="font-family:Arial,Helvetica,sans-serif">'+
+         '<p style="font-size:13px;margin:0 0 10px">'+esc(headerLine())+'</p>'+
+         '<table style="border-collapse:collapse">'+
+         '<thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+/* Put both flavours on the clipboard: rich for email, plain as the fallback
+   for anything that cannot take HTML. */
+async function copyRich(html, plain){
+  try{
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html':  new Blob([html],  {type:'text/html'}),
+      'text/plain': new Blob([plain], {type:'text/plain'})
+    })]);
+    return true;
+  }catch(e){ return false; }
+}
+
+async function copy(text){
+  try{ await navigator.clipboard.writeText(text); toast('Kopiert'); }
+  catch(e){
+    const ta=document.createElement('textarea'); ta.value=text;
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Kopiert');
+  }
+}
+
+/* ---------------- wiring ---------------- */
+wireDrop($('listDrop'), $('listInput'), readList);
+wireDrop($('invDrop'),  $('invInput'),  readInvoices);
+['colArt','colName','colMiljo','colStat'].forEach(id => $(id).addEventListener('change', readMapUI));
+
+$('saveList').addEventListener('click', async ()=>{
+  readMapUI();
+  if (!mapping.art){ note('listMsg','Velg hvilken kolonne som inneholder varenummeret.'); return; }
+  const ok = await save();
+  note('listMsg', ok ? 'Varelisten er lagret og ligger klar neste gang.'
+                     : 'Listen er aktiv nå, men kunne ikke lagres — du må laste den inn igjen neste gang.', 'info');
+  run();
+});
+
+$('clearList').addEventListener('click', async ()=>{
+  await store.del('fakturamatch:v2');
+  listRows=[]; headers=[]; mapping={art:'',name:'',miljo:'',stat:''};
+  $('mapArea').classList.add('hide'); $('diag').innerHTML='';
+  $('listNote').textContent='Ingen liste lastet';
+  note('listMsg','Lagret vareliste er fjernet.','info');
+});
+
+$('resetInv').addEventListener('click', ()=>{
+  invoiceLines=[]; invoiceLineSrc=[]; invoicePages=[]; invoiceSources=[]; matches=[]; unmatched=[]; removedKeys=new Set();
+  $('fileList').innerHTML=''; $('pasteBox').value='';
+  $('invNote').textContent='Ingen faktura lest'; note('invMsg','');
+  $('hitCount').textContent='0'; $('hitLabel').textContent='Ingen søk kjørt';
+  $('hitSub').textContent='Slipp inn en faktura';
+  $('outBtns').classList.add('hide');
+  $('resultArea').innerHTML='<div class="empty">Treffene vises her.</div>';
+});
+
+$('usePaste').addEventListener('click', ()=>{
+  const t = $('pasteBox').value;
+  if (!t.trim()){ note('invMsg','Lim inn fakturateksten først.'); return; }
+  const pasted = t.split('\n').map(l=>l.trim()).filter(Boolean);
+  const label = invoiceNumber(pasted) || 'innlimt';
+  invoiceLines = invoiceLines.concat(pasted);
+  invoiceLineSrc = invoiceLineSrc.concat(pasted.map(()=>label));
+  invoicePages.push(pasted);
+  invoiceSources.push(label);
+  $('invNote').textContent = invoiceSources.length + ' kilde(r) lest';
+  note('invMsg',''); run();
+});
+
+$('resultArea').addEventListener('click', e => {
+  const del = e.target.closest('.del');
+  if (del){ removedKeys.add(del.dataset.key); render(); return; }
+  if (e.target.id === 'undoDel'){ removedKeys = new Set(); render(); }
+});
+
+$('copyTab').addEventListener('click', ()=>copy(asTab()));
+$('copyText').addEventListener('click', ()=>copy(asText()));
+$('mailIt').addEventListener('click', async ()=>{
+  const flagged = visible().filter(m=>m.risky||m.offline).length;
+  const ok = await copyRich(asHtmlTable(), asText());
+  if (!ok) await copy(asText());
+  toast(ok ? 'Tabell kopiert' : 'Kopiert som tekst');
+
+  const warn = flagged
+    ? '<strong>Merk:</strong> '+flagged+' rad(er) er merket SJEKK og er fortsatt med. '+
+      'Fjern dem med \u00d7 f\u00f8r du sender, hvis de ikke skal v\u00e6re der. '
+    : '';
+  note('invMsg', warn + (ok
+    ? 'Tabellen er kopiert. Lim den inn i e-posten med Ctrl+V.'
+    : 'Nettleseren st\u00f8tter ikke formatert kopiering, s\u00e5 listen er kopiert som ren tekst.'),
+    flagged ? '' : 'info');
+
+  try{
+    const a = document.createElement('a');
+    a.href = 'mailto:?subject=' + encodeURIComponent('Fakturamatch \u2013 faktura ' +
+             (invoiceSources.join(', ') || 'innlimt tekst'));
+    a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){}
+});
+
+store.get('fakturamatch:v2').then(r=>{
+  if (!r) return;
+  try{
+    const d = JSON.parse(r.value);
+    headers=d.headers; mapping=d.mapping; listRows=d.rows;
+    buildMapUI();
+    $('listNote').textContent = listRows.length + ' rader · lagret liste';
+    note('listMsg','Lagret vareliste hentet inn. Slipp inn en ny fil for å oppdatere den.','info');
+  }catch(e){}
+});
+</script>
+</body>
+</html>
