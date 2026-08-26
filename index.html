@@ -9,7 +9,7 @@
 <style>
   :root{
     --concrete:#E7EAE6; --panel:#FFFFFF; --ink:#14201A; --ink2:#5A6660;
-    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --pant:#2E7D5B; --gp:#6B4C9A; --warn:#A8412C;
+    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --pant:#2E7D5B; --gp:#6B4C9A; --glass:#D6C6EE; --kvote:#F4D9A0; --warn:#A8412C;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
   }
@@ -91,6 +91,8 @@
   .chip.slf{background:var(--slf)}
   .chip.pant{background:var(--pant)}
   .chip.gp{background:var(--gp)}
+  .chip.glass{background:var(--glass);color:#3B2A61}
+  .chip.kvote{background:var(--kvote);color:#5C3F06}
   .chip.none{background:transparent;color:var(--ink2);border:1px solid var(--line);font-weight:400}
   .flag{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;
         background:#E8A33D;color:#3A2A08;padding:1px 5px;margin-left:6px;letter-spacing:.06em}
@@ -232,6 +234,8 @@ function status(v){
   if (s === '10') return 'SLF';
   if (s === '1')  return 'Pant';
   if (s === '2')  return 'GP';
+  if (s === '4')  return 'GP-Glass';
+  if (s === '5')  return 'Kvote';
   return '';
 }
 
@@ -393,14 +397,15 @@ function readMapUI(){
 function diagnose(){
 
   const blank = [], tooShort = [], risky = [];
-  let slf = 0, pant = 0, gp = 0;
+  let slf = 0, pant = 0, gp = 0, other = 0;
   for (const r of listRows){
     const n = norm(r[mapping.art]);
     if (!n) blank.push(r[mapping.name] || '(uten navn)');
     else if (n.length < 3) tooShort.push(n);
     else if (n.length === 3) risky.push(n);
     const st = mapping.miljo ? status(r[mapping.miljo]) : '';
-    if (st === 'SLF') slf++; else if (st === 'Pant') pant++; else if (st === 'GP') gp++;
+    if (st === 'SLF') slf++; else if (st === 'Pant') pant++;
+    else if (st === 'GP') gp++; else if (st) other++;
   }
   const uniq = a => [...new Set(a)];
   const LBL = {art:'Varenummer', name:'Artikkel', miljo:'Miljøavgift', stat:'Statistikknavn'};
@@ -410,7 +415,7 @@ function diagnose(){
       : '<li style="color:#A8412C">'+LBL[f]+' \u2190 <strong>ikke funnet</strong> \u2014 velg kolonnen selv over</li>')
     .join('');
   let li = '<li><strong>'+listRows.length+'</strong> varer i listen'+
-           (mapping.miljo ? ' \u2014 '+slf+' SLF, '+pant+' pant, '+gp+' GP' : '')+'</li>';
+           (mapping.miljo ? ' \u2014 '+slf+' SLF, '+pant+' pant, '+gp+' GP, '+other+' kvote/GP-Glass' : '')+'</li>';
   if (blank.length)
     li += '<li><strong>'+blank.length+'</strong> uten varenummer — disse kan <em>aldri</em> bli funnet: '+
           esc(uniq(blank).slice(0,8).join(', '))+(blank.length>8?' …':'')+'</li>';
@@ -645,6 +650,8 @@ function render(){
   const chip = m => m.stat === 'SLF'  ? '<span class="chip slf">SLF</span>'
                   : m.stat === 'Pant' ? '<span class="chip pant">PANT</span>'
                   : m.stat === 'GP'   ? '<span class="chip gp">GP</span>'
+                  : m.stat === 'GP-Glass' ? '<span class="chip glass">GP-GLASS</span>'
+                  : m.stat === 'Kvote'    ? '<span class="chip kvote">KVOTE</span>'
                   : '<span class="chip none">\u2013</span>';
 
   const rows = vis.map(m =>
@@ -686,7 +693,7 @@ const invLabel = () => {
        : n === 1 ? 'Faktura ' + invoiceSources[0]
        : n + ' fakturaer';
 };
-const headerLine = () => invLabel() + ' \u00b7 ' + dateNO();
+const headerLine = () => invLabel();
 const asTab  = () => [HEAD.join('\t'), ...visible().map(m=>[m.inv,m.art,m.name,m.code,m.stk,m.stat||'-'].join('\t'))].join('\n');
 const asText = () => {
   const vis = visible();
@@ -703,37 +710,48 @@ function asHtmlTable(){
   // Outlook substitutes its own theme colours wherever one is not stated, and it
   // strips backgrounds from <span> inside a cell. So: an explicit colour on every
   // single cell, and the status colour on the <td> itself rather than a chip.
-  const B  = '1px solid #c9d0ca';
+  const B  = '1px solid #c9d0ca';        // ordinary grid line
+  const K  = '2px solid #14201a';        // frame around one invoice
   const TD = 'border:'+B+';padding:6px 9px;font-size:13px;color:#14201a;background:#ffffff';
-  // Plain header: no fill, just bold text and a rule underneath. A dark bar reads
-  // badly once a mail client overrides the text colour to its own default.
+
   const th = t => '<th style="border:'+B+';border-bottom:2px solid #14201a;background:#ffffff;'+
                   'color:#14201a;padding:6px 9px;text-align:left;font-size:12px;'+
                   'font-weight:bold">'+esc(t)+'</th>';
-  const td = (t, mono) => '<td style="'+TD+(mono?';font-family:Consolas,monospace':'')+'">'+
-                          esc(t)+'</td>';
-  const stat = m => {
-    const bg = m.stat === 'SLF'  ? '#1b4d8f'
-             : m.stat === 'Pant' ? '#2e7d5b'
-             : m.stat === 'GP'   ? '#6b4c9a' : null;
-    return bg
-      ? '<td style="border:'+B+';padding:6px 9px;font-size:12px;background:'+bg+
-        ';color:#ffffff;font-weight:bold;text-align:center">'+
-        (m.stat === 'Pant' ? 'PANT' : m.stat)+'</td>'
-      : '<td style="'+TD+';text-align:center;color:#5a6660">\u2013</td>';
+  const td = (t, mono, extra) => '<td style="'+TD+(mono?';font-family:Consolas,monospace':'')+
+                                 (extra||'')+'">'+esc(t)+'</td>';
+
+  /* Light fills with dark text for the two newer codes, so the label stays readable. */
+  const FILL = {'SLF':['#1b4d8f','#ffffff','SLF'], 'Pant':['#2e7d5b','#ffffff','PANT'],
+                'GP':['#6b4c9a','#ffffff','GP'],   'GP-Glass':['#d6c6ee','#3b2a61','GP-GLASS'],
+                'Kvote':['#f4d9a0','#5c3f06','KVOTE']};
+  const stat = (m, extra) => {
+    const f = FILL[m.stat];
+    return f
+      ? '<td style="border:'+B+';padding:6px 9px;font-size:12px;background:'+f[0]+
+        ';color:'+f[1]+';font-weight:bold;text-align:center'+(extra||'')+'">'+f[2]+'</td>'
+      : '<td style="'+TD+';text-align:center;color:#5a6660'+(extra||'')+'">\u2013</td>';
   };
 
   const head = ['Faktura','Varenummer','Artikkel','Milj\u00f8avgift',
                 'Statistikknavn','Status'].map(th).join('');
-  // A blank, merged row closes off each invoice: it separates the groups visually and
-  // gives somewhere to click and type a comment before sending.
-  const gap = '<tr><td colspan="6" style="border:'+B+';background:#ffffff;color:#14201a;'+
-              'padding:10px 9px">&nbsp;</td></tr>';
+
   const vis = visible();
   const rows = vis.map((m, i) => {
-    const row = '<tr>'+td(m.inv,1)+td(m.art,1)+td(m.name)+td(m.code,1)+td(m.stk,1)+stat(m)+'</tr>';
-    const lastOfInvoice = (i === vis.length - 1) || vis[i+1].inv !== m.inv;
-    return row + (lastOfInvoice ? gap : '');
+    const firstOfInv = (i === 0) || vis[i-1].inv !== m.inv;
+    const lastOfInv  = (i === vis.length - 1) || vis[i+1].inv !== m.inv;
+    const top  = firstOfInv ? ';border-top:'+K : '';
+    const row = '<tr>'+
+      td(m.inv, 1, top+';border-left:'+K)+
+      td(m.art, 1, top)+
+      td(m.name, 0, top)+
+      td(m.code, 1, top)+
+      td(m.stk, 1, top)+
+      stat(m, top+';border-right:'+K)+'</tr>';
+    // The blank comment row closes the frame, so the note belongs to that invoice.
+    const gap = '<tr><td colspan="6" style="border:'+B+';border-left:'+K+';border-right:'+K+
+                ';border-bottom:'+K+';background:#ffffff;color:#14201a;padding:10px 9px">'+
+                '&nbsp;</td></tr>';
+    return row + (lastOfInv ? gap : '');
   }).join('');
 
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#14201a">'+
