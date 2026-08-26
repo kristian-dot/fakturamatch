@@ -695,8 +695,11 @@ function asHtmlTable(){
   // single cell, and the status colour on the <td> itself rather than a chip.
   const B  = '1px solid #c9d0ca';
   const TD = 'border:'+B+';padding:6px 9px;font-size:13px;color:#14201a;background:#ffffff';
-  const th = t => '<th style="border:'+B+';background:#14201a;color:#ffffff;padding:6px 9px;'+
-                  'text-align:left;font-size:12px;font-weight:bold">'+esc(t)+'</th>';
+  // Plain header: no fill, just bold text and a rule underneath. A dark bar reads
+  // badly once a mail client overrides the text colour to its own default.
+  const th = t => '<th style="border:'+B+';border-bottom:2px solid #14201a;background:#ffffff;'+
+                  'color:#14201a;padding:6px 9px;text-align:left;font-size:12px;'+
+                  'font-weight:bold">'+esc(t)+'</th>';
   const td = (t, mono) => '<td style="'+TD+(mono?';font-family:Consolas,monospace':'')+'">'+
                           esc(t)+'</td>';
   const stat = m => {
