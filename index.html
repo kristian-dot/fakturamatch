@@ -680,12 +680,22 @@ const visible = () => matches.filter(m => !removedKeys.has(rowKey(m)));
 const HEAD = ['Faktura','Varenummer','Artikkel','Miljøavgift','Statistikknavn','Status'];
 const dateNO = () => new Date().toLocaleDateString('nb-NO',
       {day:'2-digit', month:'2-digit', year:'numeric'});
-const headerLine = () => { const n = visible().length;
-  return 'Faktura ' + (invoiceSources.join(', ') || 'innlimt tekst') +
-         ' \u00b7 ' + n + (n === 1 ? ' vare' : ' varer') + ' \u00b7 ' + dateNO(); };
+const invLabel = () => {
+  const n = invoiceSources.length;
+  return n === 0 ? 'Innlimt tekst'
+       : n === 1 ? 'Faktura ' + invoiceSources[0]
+       : n + ' fakturaer';
+};
+const headerLine = () => invLabel() + ' \u00b7 ' + dateNO();
 const asTab  = () => [HEAD.join('\t'), ...visible().map(m=>[m.inv,m.art,m.name,m.code,m.stk,m.stat||'-'].join('\t'))].join('\n');
-const asText = () => headerLine() + '\n\n' +
-  visible().map(m => m.inv+' | '+m.art+' | '+m.name+' | '+(m.stk||'-')+' | '+(m.stat||'-')).join('\n');
+const asText = () => {
+  const vis = visible();
+  return headerLine() + '\n\n' + vis.map((m, i) => {
+    const row = m.inv+' | '+m.art+' | '+m.name+' | '+(m.stk||'-')+' | '+(m.stat||'-');
+    const lastOfInvoice = (i === vis.length - 1) || vis[i+1].inv !== m.inv;
+    return row + (lastOfInvoice ? '\n' : '');
+  }).join('\n');
+};
 
 /* A formatted table for pasting into an email. Email clients strip <style> blocks,
    so every rule has to be an inline attribute on the element itself. */
@@ -715,8 +725,16 @@ function asHtmlTable(){
 
   const head = ['Faktura','Varenummer','Artikkel','Milj\u00f8avgift',
                 'Statistikknavn','Status'].map(th).join('');
-  const rows = visible().map(m =>
-    '<tr>'+td(m.inv,1)+td(m.art,1)+td(m.name)+td(m.code,1)+td(m.stk,1)+stat(m)+'</tr>').join('');
+  // A blank, merged row closes off each invoice: it separates the groups visually and
+  // gives somewhere to click and type a comment before sending.
+  const gap = '<tr><td colspan="6" style="border:'+B+';background:#ffffff;color:#14201a;'+
+              'padding:10px 9px">&nbsp;</td></tr>';
+  const vis = visible();
+  const rows = vis.map((m, i) => {
+    const row = '<tr>'+td(m.inv,1)+td(m.art,1)+td(m.name)+td(m.code,1)+td(m.stk,1)+stat(m)+'</tr>';
+    const lastOfInvoice = (i === vis.length - 1) || vis[i+1].inv !== m.inv;
+    return row + (lastOfInvoice ? gap : '');
+  }).join('');
 
   return '<div style="font-family:Arial,Helvetica,sans-serif;color:#14201a">'+
          '<p style="font-size:13px;margin:0 0 10px;color:#14201a">'+esc(headerLine())+'</p>'+
@@ -827,8 +845,7 @@ $('mailIt').addEventListener('click', async ()=>{
   try{
     const a = document.createElement('a');
     a.href = 'mailto:' + encodeURIComponent(recipient()).replace(/%40/g,'@').replace(/%2C/g,',') +
-             '?subject=' + encodeURIComponent('Fakturamatch \u2013 faktura ' +
-             (invoiceSources.join(', ') || 'innlimt tekst'));
+             '?subject=' + encodeURIComponent('Fakturamatch \u2013 ' + invLabel());
     a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   }catch(e){}
