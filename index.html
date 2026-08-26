@@ -9,7 +9,7 @@
 <style>
   :root{
     --concrete:#E7EAE6; --panel:#FFFFFF; --ink:#14201A; --ink2:#5A6660;
-    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --pant:#2E7D5B; --warn:#A8412C;
+    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --pant:#2E7D5B; --gp:#6B4C9A; --warn:#A8412C;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
   }
@@ -90,12 +90,21 @@
         letter-spacing:.08em;padding:2px 6px;color:#fff}
   .chip.slf{background:var(--slf)}
   .chip.pant{background:var(--pant)}
+  .chip.gp{background:var(--gp)}
   .chip.none{background:transparent;color:var(--ink2);border:1px solid var(--line);font-weight:400}
   .flag{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;
         background:#E8A33D;color:#3A2A08;padding:1px 5px;margin-left:6px;letter-spacing:.06em}
   button.del{background:transparent;color:var(--ink2);border:1px solid var(--line);
              padding:2px 8px;font-size:15px;line-height:1.2;letter-spacing:0}
   button.del:hover{background:var(--warn);border-color:var(--warn);color:#fff}
+  .recip{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+  .recip label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+               color:var(--ink2);font-weight:700;margin-bottom:6px}
+  .recip-row{display:flex;gap:8px;flex-wrap:wrap}
+  .recip-row input{flex:1;min-width:220px;padding:9px 10px;border:1px solid var(--line);
+                   background:#FAFBF9;font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .recip-row input:focus{outline:2px solid var(--hiviz);outline-offset:-1px}
+  .recip-note{margin:7px 0 0;font-size:12px;color:var(--ink2)}
   .tablescroll{overflow-x:auto;margin:0 -18px;padding:0 18px}
 
   .empty{padding:34px 18px;text-align:center;color:var(--ink2);font-size:14px}
@@ -182,6 +191,16 @@
         <button class="ghost" id="copyText">Kopier som tekst</button>
         <button class="ghost" id="mailIt">Kopier tabell + e-post</button>
       </div>
+      <div class="recip">
+        <label for="recipient">Mottaker av e-post</label>
+        <div class="recip-row">
+          <input type="text" id="recipient" autocomplete="off" spellcheck="false"
+                 placeholder="navn@firma.no — flere adresser skilles med komma">
+          <button class="ghost" id="saveRecip">Lagre</button>
+        </div>
+        <p class="recip-note">Lagres bare i denne nettleseren, på denne maskinen.
+           La feltet stå tomt for å åpne e-posten uten mottaker.</p>
+      </div>
     </div>
   </section>
 </div>
@@ -212,6 +231,7 @@ function status(v){
   const s = String(v == null ? '' : v).trim();
   if (s === '10') return 'SLF';
   if (s === '1')  return 'Pant';
+  if (s === '2')  return 'GP';
   return '';
 }
 
@@ -230,6 +250,17 @@ const store = {
     try{ await window.storage.delete(k); }catch(e){}
   }
 };
+
+/* Kept under its own key: clearing the vareliste must not clear the recipient. */
+const RECIP_KEY = 'fakturamatch:mottaker';
+const recipient = () => $('recipient').value
+  .split(',').map(x => x.trim()).filter(Boolean).join(',');
+
+async function saveRecipient(){
+  const v = recipient();
+  if (v) await store.set(RECIP_KEY, v); else await store.del(RECIP_KEY);
+  return v;
+}
 
 async function save(){
   const cols = [mapping.art, mapping.name, mapping.miljo, mapping.stat].filter(Boolean);
@@ -259,7 +290,12 @@ async function readList(files){
     const wb = XLSX.read(await file.arrayBuffer(), {type:'array'});
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:'', raw:false});
     if (!rows.length) throw new Error('Arket er tomt.');
-    listRows = rows; headers = Object.keys(rows[0]);
+    listRows = rows;
+    // Columns whose header cell in row 1 is blank get invented names (__EMPTY, __EMPTY_1).
+    // Hide the ones that are empty all the way down; keep any that actually hold data,
+    // so a column with data but no heading can still be chosen.
+    headers = Object.keys(rows[0]).filter(h =>
+      !EMPTYCOL.test(h) || rows.some(r => String(r[h] == null ? '' : r[h]).trim() !== ''));
     mapping = {art:'', name:'', miljo:'', stat:''};
     buildMapUI();
     $('listNote').textContent = rows.length + ' rader · ' + file.name;
@@ -268,21 +304,75 @@ async function readList(files){
   }
 }
 
-function guess(cands){
-  for (const c of cands){
-    const h = headers.find(x => x.toLowerCase().replace(/[^a-zæøå0-9]/g,'').includes(c));
-    if (h) return h;
+/* Work out which column is which, by scoring every header against every field.
+   An exact header match always beats a partial one, so a list containing both
+   "Artikkelnummer" and "Artikkel" maps each to the right place. Extra columns are
+   simply ignored. The dropdowns stay editable — this only sets the starting point. */
+const COLPAT = {
+  /* [pattern, weight]. Weight says how strongly the wording implies the field, so
+     "Art. nr. hovedlev" always wins over "Artikkelnr" even when both match exactly
+     and even when Artikkelnr sits further left in the sheet. */
+  /* Only wordings that mean an article NUMBER. A bare "Hovedlev." or "Leverandør"
+     column is the supplier's name and must never win this field. */
+  art: [['artnrhovedlev',100],['hovedlevartnr',100],['hovedleverandørartnr',100],
+        ['leverandørartnr',95],['levartnr',95],['hovedlevartikkelnr',95],
+        ['supplieritemno',70],['artikkelnummer',60],['artikkelnr',60],
+        ['varenummer',55],['varenr',55],['artnr',50]],
+  name: [['artikkel',100],['varenavn',100],['produktnavn',95],['beskrivelse',90],
+         ['varetekst',90],['itemname',85],['description',85],['navn',80],
+         ['produkt',75],['tekst',70]],
+  miljo: [['miljøavgiftsprofil',100],['miljoavgiftsprofil',100],['miljøavgift',95],
+          ['miljoavgift',95],['avgiftsprofil',90],['miljø',70],['avgift',65]],
+  stat: [['statistikknavn',100],['statistikk',90],['tolltariff',85],['varenrstat',80],
+         ['hskode',75],['hscode',75]]
+};
+/* Words that mean a header is a code, not a name. Keeps "Artikkelnummer" out of Artikkel. */
+const NOTNAME = ['nr','nummer','kode','id','profil'];
+
+const EMPTYCOL = /^__EMPTY(_\d+)?$/;
+const colLabel = h => EMPTYCOL.test(h)
+  ? '(kolonne uten overskrift' + (h === '__EMPTY' ? '' : ' ' + h.split('_').pop()) + ')'
+  : h;
+
+const colKey = h => String(h).toLowerCase().replace(/[^a-z0-9æøå]/g, '');
+
+function autoMap(headers){
+  const cand = [];
+  for (const field of Object.keys(COLPAT)){
+    for (const h of headers){
+      if (EMPTYCOL.test(h)) continue;      // no heading = nothing to match on
+      const k = colKey(h);
+      if (!k) continue;
+      let best = 0, exact = false;
+      for (const [pat, w] of COLPAT[field]){
+        let sc = 0;
+        if (k === pat)                sc = w + 20;
+        else if (k.startsWith(pat))   sc = w + 10;
+        else if (k.indexOf(pat) >= 0) sc = w;
+        else continue;
+        if (sc > best){ best = sc; exact = (k === pat); }
+      }
+      if (field === 'name' && !exact && NOTNAME.some(w => k.indexOf(w) >= 0)) best -= 60;
+      if (best >= 50) cand.push({field, h, score: best});
+    }
   }
-  return '';
+  cand.sort((a,b) => b.score - a.score);
+  const out = {art:'', name:'', miljo:'', stat:''}, used = new Set();
+  for (const c of cand){
+    if (out[c.field] || used.has(c.h)) continue;   // one column per field, one field per column
+    out[c.field] = c.h; used.add(c.h);
+  }
+  return out;
 }
 
 function buildMapUI(){
   const opts = c => '<option value="">— velg —</option>' +
-    headers.map(h=>'<option value="'+h.replace(/"/g,'&quot;')+'"'+(h===c?' selected':'')+'>'+h+'</option>').join('');
-  mapping.art   = mapping.art   || guess(['artnrhovedlev','hovedlev','varenummer','artikkelnummer','artnr']);
-  mapping.name  = mapping.name  || guess(['artikkel','varenavn','navn','beskrivelse']);
-  mapping.miljo = mapping.miljo || guess(['miljøavgift','miljoavgift','avgiftsprofil','miljø']);
-  mapping.stat  = mapping.stat  || guess(['statistikknavn','statistikk','varenummerstat','tolltariff']);
+    headers.map(h=>'<option value="'+esc(h).replace(/"/g,'&quot;')+'"'+(h===c?' selected':'')+'>'+
+                   esc(colLabel(h))+'</option>').join('');
+  const auto = autoMap(headers);
+  for (const f of ['art','name','miljo','stat']){
+    if (!mapping[f] || headers.indexOf(mapping[f]) < 0) mapping[f] = auto[f];
+  }
   $('colArt').innerHTML   = opts(mapping.art);
   $('colName').innerHTML  = opts(mapping.name);
   $('colMiljo').innerHTML = opts(mapping.miljo);
@@ -301,20 +391,26 @@ function readMapUI(){
 
 /* Report what in the list can and cannot be matched, before anything is run. */
 function diagnose(){
-  if (!mapping.art){ $('diag').innerHTML=''; return; }
+
   const blank = [], tooShort = [], risky = [];
-  let slf = 0, pant = 0;
+  let slf = 0, pant = 0, gp = 0;
   for (const r of listRows){
     const n = norm(r[mapping.art]);
     if (!n) blank.push(r[mapping.name] || '(uten navn)');
     else if (n.length < 3) tooShort.push(n);
     else if (n.length === 3) risky.push(n);
     const st = mapping.miljo ? status(r[mapping.miljo]) : '';
-    if (st === 'SLF') slf++; else if (st === 'Pant') pant++;
+    if (st === 'SLF') slf++; else if (st === 'Pant') pant++; else if (st === 'GP') gp++;
   }
   const uniq = a => [...new Set(a)];
+  const LBL = {art:'Varenummer', name:'Artikkel', miljo:'Miljøavgift', stat:'Statistikknavn'};
+  const picked = ['art','name','miljo','stat']
+    .map(f => mapping[f]
+      ? '<li>'+LBL[f]+' \u2190 <code>'+esc(colLabel(mapping[f]))+'</code></li>'
+      : '<li style="color:#A8412C">'+LBL[f]+' \u2190 <strong>ikke funnet</strong> \u2014 velg kolonnen selv over</li>')
+    .join('');
   let li = '<li><strong>'+listRows.length+'</strong> varer i listen'+
-           (mapping.miljo ? ' — '+slf+' merket SLF, '+pant+' merket pant' : '')+'</li>';
+           (mapping.miljo ? ' \u2014 '+slf+' SLF, '+pant+' pant, '+gp+' GP' : '')+'</li>';
   if (blank.length)
     li += '<li><strong>'+blank.length+'</strong> uten varenummer — disse kan <em>aldri</em> bli funnet: '+
           esc(uniq(blank).slice(0,8).join(', '))+(blank.length>8?' …':'')+'</li>';
@@ -324,19 +420,22 @@ function diagnose(){
   if (risky.length)
     li += '<li><strong>'+risky.length+'</strong> korte numre blir <em>flagget</em> ved treff, sjekk dem selv: <code>'+
           esc(uniq(risky).join('</code> <code>'))+'</code></li>';
-  $('diag').innerHTML = '<div class="diag"><h4>Slik ser listen ut</h4><ul>'+li+'</ul></div>';
+  $('diag').innerHTML =
+    '<div class="diag"><h4>Kolonner som brukes</h4><ul>'+picked+'</ul></div>'+
+    '<div class="diag" style="margin-top:10px"><h4>Slik ser listen ut</h4><ul>'+li+'</ul></div>';
 }
 
 /* ---------------- invoice ---------------- */
 /* Pull the invoice number out of the header. Layouts differ: some suppliers put
    the value on the same line as the label, others put it on the following line
    next to the customer number. Falls back to the file name. */
-const INV_LBL = /(invoice\s*no|invoice\s*number|fakturanr|faktura\s*nr)\b[.:]?/i;
+const INV_LBL = /(invoice\s*no|invoice\s*number|fakturanr|faktura\s*nr|document\s*no)\b[.:]?/i;
 function invoiceNumber(lines){
   for (let i=0;i<lines.length;i++){
     const m = INV_LBL.exec(lines[i]);
     if (!m) continue;
     const pick = t => (String(t).match(/[A-Z0-9][A-Z0-9\/\-]{3,}/gi) || [])
+      .map(x => x.replace(/[\/\-.]+$/, ''))          // strip a trailing "/" or "." left by the label
       .filter(x => /\d/.test(x) && !/^(customer|kunde|order|page|date)/i.test(x));
     let c = pick(lines[i].slice(m.index + m[0].length));
     if (c.length) return c[0];
@@ -453,11 +552,16 @@ function run(){
   if (!mapping.art){ note('listMsg','Velg hvilken kolonne som inneholder varenummeret.'); return; }
 
   const index = new Map();
+  const add = (k, i) => {
+    if (!k) return;
+    let a = index.get(k);
+    if (!a){ a = []; index.set(k, a); }
+    if (a[a.length-1] !== i) a.push(i);      // one entry per line, not per token
+  };
   invoiceLines.forEach((line, i) => {
     for (const t of line.split(/[^A-Za-z0-9]+/)){
       if (!t) continue;
-      const k = t.toUpperCase();
-      if (!index.has(k)) index.set(k, i);
+      add(t.toUpperCase(), i);
     }
     // A hyphen inside one unbroken word is part of the number, so join across it.
     // Joining across spaces is NOT done: that invents numbers out of prices and discounts.
@@ -465,8 +569,7 @@ function run(){
       const clean = w.replace(/^[.,;:()]+|[.,;:()]+$/g,'');
       if (clean.indexOf('-') < 0) continue;
       if (/^\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}$/.test(clean)) continue;   // dates
-      const k = norm(clean);
-      if (k && !index.has(k)) index.set(k, i);
+      add(norm(clean), i);
     }
   });
 
@@ -482,21 +585,31 @@ function run(){
   for (const r of listRows){
     const n = norm(r[mapping.art]);
     if (n.length < 3) continue;
-    if (!index.has(n)) continue;
-    const ln = invoiceLines[index.get(n)] || '';
-    const lead = norm((ln.split(/\s+/)[0]) || '');
-    matches.push({
-      inv:  invoiceLineSrc[index.get(n)] || '',
-      art:  r[mapping.art],
-      name: mapping.name  ? r[mapping.name]  : '',
-      code: mapping.miljo ? String(r[mapping.miljo]||'').trim() : '',
-      stat: mapping.miljo ? status(r[mapping.miljo]) : '',
-      stk:  mapping.stat  ? String(r[mapping.stat]||'').trim() : '',
-      ctx:  ln,
-      risky: n.length === 3,
-      offline: itemLineSet.size > 0 && !itemLineSet.has(ln) && lead !== n
-    });
+    const occ = index.get(n);
+    if (!occ) continue;
+    // A vare listed twice on the invoice must appear twice. But some suppliers print
+    // the article number again on a batch line under the item — that is the same
+    // delivery, not a second one. So only count occurrences on real product lines.
+    const onItem = occ.filter(i => itemLineSet.has(invoiceLines[i]));
+    const use = onItem.length ? onItem : [occ[0]];
+    for (const li of use){
+      const ln = invoiceLines[li] || '';
+      const lead = norm((ln.split(/\s+/)[0]) || '');
+      matches.push({
+        line: li,
+        inv:  invoiceLineSrc[li] || '',
+        art:  r[mapping.art],
+        name: mapping.name  ? r[mapping.name]  : '',
+        code: mapping.miljo ? String(r[mapping.miljo]||'').trim() : '',
+        stat: mapping.miljo ? status(r[mapping.miljo]) : '',
+        stk:  mapping.stat  ? String(r[mapping.stat]||'').trim() : '',
+        ctx:  ln,
+        risky: n.length === 3,
+        offline: itemLineSet.size > 0 && !itemLineSet.has(ln) && lead !== n
+      });
+    }
   }
+  matches.sort((a,b) => a.line - b.line);   // follow the invoice, not the vareliste
   render();
 }
 
@@ -531,6 +644,7 @@ function render(){
 
   const chip = m => m.stat === 'SLF'  ? '<span class="chip slf">SLF</span>'
                   : m.stat === 'Pant' ? '<span class="chip pant">PANT</span>'
+                  : m.stat === 'GP'   ? '<span class="chip gp">GP</span>'
                   : '<span class="chip none">\u2013</span>';
 
   const rows = vis.map(m =>
@@ -561,7 +675,7 @@ function render(){
 }
 
 /* ---------------- output ---------------- */
-const rowKey = m => m.inv + '\u0001' + m.art;
+const rowKey = m => m.inv + '\u0001' + m.art + '\u0001' + m.line;
 const visible = () => matches.filter(m => !removedKeys.has(rowKey(m)));
 const HEAD = ['Faktura','Varenummer','Artikkel','Miljøavgift','Statistikknavn','Status'];
 const dateNO = () => new Date().toLocaleDateString('nb-NO',
@@ -576,24 +690,34 @@ const asText = () => headerLine() + '\n\n' +
 /* A formatted table for pasting into an email. Email clients strip <style> blocks,
    so every rule has to be an inline attribute on the element itself. */
 function asHtmlTable(){
-  const B = '1px solid #c9d0ca';
-  const th = t => '<th style="border:'+B+';background:#14201a;color:#fff;padding:6px 9px;'+
-                  'text-align:left;font-size:12px">'+esc(t)+'</th>';
-  const td = (t,mono) => '<td style="border:'+B+';padding:6px 9px;font-size:13px'+
-                  (mono?';font-family:Consolas,monospace':'')+'">'+esc(t)+'</td>';
-  const badge = m =>
-      m.stat === 'SLF'  ? '<span style="background:#1b4d8f;color:#fff;padding:2px 7px;font-size:11px;font-weight:bold">SLF</span>'
-    : m.stat === 'Pant' ? '<span style="background:#2e7d5b;color:#fff;padding:2px 7px;font-size:11px;font-weight:bold">PANT</span>'
-    : '<span style="color:#5a6660">\u2013</span>';
+  // Outlook substitutes its own theme colours wherever one is not stated, and it
+  // strips backgrounds from <span> inside a cell. So: an explicit colour on every
+  // single cell, and the status colour on the <td> itself rather than a chip.
+  const B  = '1px solid #c9d0ca';
+  const TD = 'border:'+B+';padding:6px 9px;font-size:13px;color:#14201a;background:#ffffff';
+  const th = t => '<th style="border:'+B+';background:#14201a;color:#ffffff;padding:6px 9px;'+
+                  'text-align:left;font-size:12px;font-weight:bold">'+esc(t)+'</th>';
+  const td = (t, mono) => '<td style="'+TD+(mono?';font-family:Consolas,monospace':'')+'">'+
+                          esc(t)+'</td>';
+  const stat = m => {
+    const bg = m.stat === 'SLF'  ? '#1b4d8f'
+             : m.stat === 'Pant' ? '#2e7d5b'
+             : m.stat === 'GP'   ? '#6b4c9a' : null;
+    return bg
+      ? '<td style="border:'+B+';padding:6px 9px;font-size:12px;background:'+bg+
+        ';color:#ffffff;font-weight:bold;text-align:center">'+
+        (m.stat === 'Pant' ? 'PANT' : m.stat)+'</td>'
+      : '<td style="'+TD+';text-align:center;color:#5a6660">\u2013</td>';
+  };
 
-  const head = ['Faktura','Varenummer','Artikkel','Milj\u00f8avgift','Statistikknavn','Status'].map(th).join('');
+  const head = ['Faktura','Varenummer','Artikkel','Milj\u00f8avgift',
+                'Statistikknavn','Status'].map(th).join('');
   const rows = visible().map(m =>
-    '<tr>'+td(m.inv,1)+td(m.art,1)+td(m.name)+td(m.code,1)+td(m.stk,1)+
-    '<td style="border:'+B+';padding:6px 9px">'+badge(m)+'</td></tr>').join('');
+    '<tr>'+td(m.inv,1)+td(m.art,1)+td(m.name)+td(m.code,1)+td(m.stk,1)+stat(m)+'</tr>').join('');
 
-  return '<div style="font-family:Arial,Helvetica,sans-serif">'+
-         '<p style="font-size:13px;margin:0 0 10px">'+esc(headerLine())+'</p>'+
-         '<table style="border-collapse:collapse">'+
+  return '<div style="font-family:Arial,Helvetica,sans-serif;color:#14201a">'+
+         '<p style="font-size:13px;margin:0 0 10px;color:#14201a">'+esc(headerLine())+'</p>'+
+         '<table style="border-collapse:collapse;color:#14201a">'+
          '<thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
@@ -668,6 +792,18 @@ $('resultArea').addEventListener('click', e => {
   if (e.target.id === 'undoDel'){ removedKeys = new Set(); render(); }
 });
 
+$('saveRecip').addEventListener('click', async ()=>{
+  const v = await saveRecipient();
+  if (!v){ toast('Mottaker fjernet'); note('invMsg',''); return; }
+  $('recipient').value = v;                       // show the tidied-up version
+  const odd = v.split(',').filter(a => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a));
+  toast('Mottaker lagret');
+  note('invMsg', odd.length
+    ? 'Lagret, men dette ser ikke ut som en e-postadresse: <strong>'+esc(odd.join(', '))+'</strong>'
+    : 'Mottaker lagret på denne maskinen: <strong>'+esc(v)+'</strong>', odd.length ? '' : 'info');
+});
+$('recipient').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveRecip').click(); });
+
 $('copyTab').addEventListener('click', ()=>copy(asTab()));
 $('copyText').addEventListener('click', ()=>copy(asText()));
 $('mailIt').addEventListener('click', async ()=>{
@@ -687,12 +823,16 @@ $('mailIt').addEventListener('click', async ()=>{
 
   try{
     const a = document.createElement('a');
-    a.href = 'mailto:?subject=' + encodeURIComponent('Fakturamatch \u2013 faktura ' +
+    a.href = 'mailto:' + encodeURIComponent(recipient()).replace(/%40/g,'@').replace(/%2C/g,',') +
+             '?subject=' + encodeURIComponent('Fakturamatch \u2013 faktura ' +
              (invoiceSources.join(', ') || 'innlimt tekst'));
     a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   }catch(e){}
 });
+
+store.get(RECIP_KEY).then(r => { if (r && r.value) $('recipient').value = r.value; })
+                    .catch(()=>{});
 
 store.get('fakturamatch:v2').then(r=>{
   if (!r) return;
