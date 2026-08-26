@@ -749,7 +749,9 @@ function asHtmlTable(){
       td(m.code, 1, edge)+
       td(m.stk, 1, edge)+
       stat(m, edge+';border-right:'+K)+'</tr>';
-    const gap = '<tr><td colspan="6" style="border:none;background:#ffffff;color:#14201a;'+
+    // Light grey box, same weight as the grid lines: clearly a row you can write in,
+    // without competing with the black frame around the invoice above it.
+    const gap = '<tr><td colspan="6" style="border:'+B+';background:#ffffff;color:#14201a;'+
                 'padding:10px 9px;font-size:13px">&nbsp;</td></tr>';
     return row + (lastOfInv ? gap : '');
   }).join('');
