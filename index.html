@@ -9,7 +9,7 @@
 <style>
   :root{
     --concrete:#E7EAE6; --panel:#FFFFFF; --ink:#14201A; --ink2:#5A6660;
-    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --pant:#2E7D5B; --gp:#6B4C9A; --glass:#D6C6EE; --kvote:#F4D9A0; --warn:#A8412C;
+    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --inf:#2E7D5B; --gp:#6B4C9A; --glass:#D6C6EE; --kvote:#F4D9A0; --warn:#A8412C;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
   }
@@ -89,7 +89,7 @@
   .chip{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;
         letter-spacing:.08em;padding:2px 6px;color:#fff}
   .chip.slf{background:var(--slf)}
-  .chip.pant{background:var(--pant)}
+  .chip.inf{background:var(--inf)}
   .chip.gp{background:var(--gp)}
   .chip.glass{background:var(--glass);color:#3B2A61}
   .chip.kvote{background:var(--kvote);color:#5C3F06}
@@ -125,7 +125,7 @@
 
   <div class="masthead">
     <h1>Fakturamatch</h1>
-    <p>Slipp inn en faktura. Varer som finnes i varelisten hentes ut, merket med SLF eller pant.</p>
+    <p>Slipp inn en faktura. Varer som finnes i varelisten hentes ut, merket med SLF, INF, GP og kvote.</p>
   </div>
 
   <section class="stage">
@@ -228,11 +228,11 @@ function note(where, html, kind){
   $(where).innerHTML = html ? '<div class="msg '+(kind||'')+'">'+html+'</div>' : '';
 }
 
-/* miljøavgiftsprofil: 10 = SLF, 1 = pant, alt annet = ingenting */
+/* miljøavgiftsprofil: 10 = SLF, 1 = INF, 2 = GP, 4 = GP-Glass, 5 = Kvote */
 function status(v){
   const s = String(v == null ? '' : v).trim();
   if (s === '10') return 'SLF';
-  if (s === '1')  return 'Pant';
+  if (s === '1')  return 'INF';
   if (s === '2')  return 'GP';
   if (s === '4')  return 'GP-Glass';
   if (s === '5')  return 'Kvote';
@@ -397,14 +397,14 @@ function readMapUI(){
 function diagnose(){
 
   const blank = [], tooShort = [], risky = [];
-  let slf = 0, pant = 0, gp = 0, other = 0;
+  let slf = 0, inf = 0, gp = 0, other = 0;
   for (const r of listRows){
     const n = norm(r[mapping.art]);
     if (!n) blank.push(r[mapping.name] || '(uten navn)');
     else if (n.length < 3) tooShort.push(n);
     else if (n.length === 3) risky.push(n);
     const st = mapping.miljo ? status(r[mapping.miljo]) : '';
-    if (st === 'SLF') slf++; else if (st === 'Pant') pant++;
+    if (st === 'SLF') slf++; else if (st === 'INF') inf++;
     else if (st === 'GP') gp++; else if (st) other++;
   }
   const uniq = a => [...new Set(a)];
@@ -415,7 +415,7 @@ function diagnose(){
       : '<li style="color:#A8412C">'+LBL[f]+' \u2190 <strong>ikke funnet</strong> \u2014 velg kolonnen selv over</li>')
     .join('');
   let li = '<li><strong>'+listRows.length+'</strong> varer i listen'+
-           (mapping.miljo ? ' \u2014 '+slf+' SLF, '+pant+' pant, '+gp+' GP, '+other+' kvote/GP-Glass' : '')+'</li>';
+           (mapping.miljo ? ' \u2014 '+slf+' SLF, '+inf+' INF, '+gp+' GP, '+other+' kvote/GP-Glass' : '')+'</li>';
   if (blank.length)
     li += '<li><strong>'+blank.length+'</strong> uten varenummer — disse kan <em>aldri</em> bli funnet: '+
           esc(uniq(blank).slice(0,8).join(', '))+(blank.length>8?' …':'')+'</li>';
@@ -648,7 +648,7 @@ function render(){
   }
 
   const chip = m => m.stat === 'SLF'  ? '<span class="chip slf">SLF</span>'
-                  : m.stat === 'Pant' ? '<span class="chip pant">PANT</span>'
+                  : m.stat === 'INF'  ? '<span class="chip inf">INF</span>'
                   : m.stat === 'GP'   ? '<span class="chip gp">GP</span>'
                   : m.stat === 'GP-Glass' ? '<span class="chip glass">GP-GLASS</span>'
                   : m.stat === 'Kvote'    ? '<span class="chip kvote">KVOTE</span>'
@@ -721,7 +721,7 @@ function asHtmlTable(){
                                  (extra||'')+'">'+esc(t)+'</td>';
 
   /* Light fills with dark text for the two newer codes, so the label stays readable. */
-  const FILL = {'SLF':['#1b4d8f','#ffffff','SLF'], 'Pant':['#2e7d5b','#ffffff','PANT'],
+  const FILL = {'SLF':['#1b4d8f','#ffffff','SLF'], 'INF':['#2e7d5b','#ffffff','INF'],
                 'GP':['#6b4c9a','#ffffff','GP'],   'GP-Glass':['#d6c6ee','#3b2a61','GP-GLASS'],
                 'Kvote':['#f4d9a0','#5c3f06','KVOTE']};
   const stat = (m, extra) => {
