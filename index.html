@@ -552,6 +552,24 @@ function candidateLines(pages){
   return out;
 }
 
+function natCmp(a, b){
+  const split = v => {
+    const out = [];
+    String(v == null ? '' : v).replace(/(\d+)|(\D+)/g,
+      (_, num, txt) => { out.push(num !== undefined ? ['n', Number(num)] : ['t', txt.toUpperCase()]); });
+    return out;
+  };
+  const A = split(a), B = split(b);
+  for (let i = 0; i < Math.max(A.length, B.length); i++){
+    if (!A[i]) return -1;
+    if (!B[i]) return 1;
+    if (A[i][0] !== B[i][0]) return A[i][0] === 'n' ? -1 : 1;   // numbers before text
+    if (A[i][1] < B[i][1]) return -1;
+    if (A[i][1] > B[i][1]) return 1;
+  }
+  return 0;
+}
+
 function run(){
   if (!listRows.length || !invoiceLines.length) return;
   if (!mapping.art){ note('listMsg','Velg hvilken kolonne som inneholder varenummeret.'); return; }
@@ -614,7 +632,10 @@ function run(){
       });
     }
   }
-  matches.sort((a,b) => a.line - b.line);   // follow the invoice, not the vareliste
+  // Sort by fakturanummer, lowest first, then by position within that invoice.
+  // Natural order: numeric runs compare as numbers, so 999 comes before 1000, and
+  // labels like "V2027/00123" or "FS 7/MAG/05/2026" still sort sensibly.
+  matches.sort((a,b) => natCmp(a.inv, b.inv) || (a.line - b.line));
   render();
 }
 
@@ -732,8 +753,8 @@ function asHtmlTable(){
       : '<td style="'+TD+';text-align:center;color:#5a6660'+(extra||'')+'">\u2013</td>';
   };
 
-  const head = ['Faktura','Varenummer','Artikkel','Milj\u00f8avgift',
-                'Statistikknavn','Status'].map(th).join('');
+  // Miljøavgift is left out on purpose: Status already says what it means.
+  const head = ['Faktura','Varenummer','Artikkel','Statistikknavn','Status'].map(th).join('');
 
   const vis = visible();
   const rows = vis.map((m, i) => {
@@ -746,12 +767,11 @@ function asHtmlTable(){
       td(m.inv, 1, edge+';border-left:'+K)+
       td(m.art, 1, edge)+
       td(m.name, 0, edge)+
-      td(m.code, 1, edge)+
       td(m.stk, 1, edge)+
       stat(m, edge+';border-right:'+K)+'</tr>';
     // Light grey box, same weight as the grid lines: clearly a row you can write in,
     // without competing with the black frame around the invoice above it.
-    const gap = '<tr><td colspan="6" style="border:'+B+';background:#ffffff;color:#14201a;'+
+    const gap = '<tr><td colspan="5" style="border:'+B+';background:#ffffff;color:#14201a;'+
                 'padding:10px 9px;font-size:13px">&nbsp;</td></tr>';
     return row + (lastOfInv ? gap : '');
   }).join('');
@@ -865,7 +885,7 @@ $('mailIt').addEventListener('click', async ()=>{
   try{
     const a = document.createElement('a');
     a.href = 'mailto:' + encodeURIComponent(recipient()).replace(/%40/g,'@').replace(/%2C/g,',') +
-             '?subject=' + encodeURIComponent('Fakturamatch \u2013 ' + invLabel());
+             '?subject=' + encodeURIComponent('Fortolling ?, faktura m/p\u00e5tegning (hentes ca ?)');
     a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   }catch(e){}
