@@ -146,6 +146,7 @@
           <div><label for="colName">Artikkel</label><select id="colName"></select></div>
           <div><label for="colMiljo">Miljøavgiftsprofil</label><select id="colMiljo"></select></div>
           <div><label for="colStat">Statistikknavn</label><select id="colStat"></select></div>
+          <div><label for="colLev">Hovedlev. (valgfri — gir leverandør i emnefeltet)</label><select id="colLev"></select></div>
         </div>
         <div id="diag"></div>
         <div class="btnrow">
@@ -212,7 +213,7 @@
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-let listRows = [], headers = [], mapping = {art:'', name:'', miljo:'', stat:''};
+let listRows = [], headers = [], mapping = {art:'', name:'', miljo:'', stat:'', lev:''};
 let invoiceLines = [], invoiceLineSrc = [], invoicePages = [], invoiceSources = [], matches = [], unmatched = [];
 let removedKeys = new Set();
 
@@ -257,6 +258,33 @@ const store = {
 
 /* Kept under its own key: clearing the vareliste must not clear the recipient. */
 const RECIP_KEY = 'fakturamatch:mottaker';
+/* Leverandørnavn per Hovedlev.-kode. Bare i denne nettleseren — ingen navn
+   ligger i selve filen, og ingenting sendes noe sted. */
+const LEV_KEY = 'fakturamatch:leverandorer';
+let levNames = {};
+
+async function loadLevNames(){
+  try{ const r = await store.get(LEV_KEY); if (r) levNames = JSON.parse(r.value) || {}; }catch(e){}
+}
+async function saveLevNames(){
+  try{ await store.set(LEV_KEY, JSON.stringify(levNames)); }catch(e){}
+}
+
+/* Codes on the rows that are actually going out (deleted rows do not count). */
+function levCodes(){
+  return [...new Set(visible().map(m => (m.lev || '').trim()).filter(Boolean))].sort();
+}
+/* The supplier for the subject line: every code present must resolve to the same
+   name. One supplier can span several codes, so codes sharing a name still agree.
+   Anything unknown or genuinely mixed leaves the ? alone. */
+function levName(){
+  const codes = levCodes();
+  if (!codes.length) return '';
+  const names = [...new Set(codes.map(c => levNames[c]).filter(Boolean))];
+  if (names.length !== 1) return '';
+  if (codes.some(c => !levNames[c])) return '';
+  return names[0];
+}
 const recipient = () => $('recipient').value
   .split(',').map(x => x.trim()).filter(Boolean).join(',');
 
@@ -267,7 +295,7 @@ async function saveRecipient(){
 }
 
 async function save(){
-  const cols = [mapping.art, mapping.name, mapping.miljo, mapping.stat].filter(Boolean);
+  const cols = [mapping.art, mapping.name, mapping.miljo, mapping.stat, mapping.lev].filter(Boolean);
   const slim = listRows.map(r => { const o={}; cols.forEach(c => o[c]=r[c]); return o; });
   return await store.set('fakturamatch:v2', JSON.stringify({headers, mapping, rows:slim}));
 }
@@ -300,7 +328,7 @@ async function readList(files){
     // so a column with data but no heading can still be chosen.
     headers = Object.keys(rows[0]).filter(h =>
       !EMPTYCOL.test(h) || rows.some(r => String(r[h] == null ? '' : r[h]).trim() !== ''));
-    mapping = {art:'', name:'', miljo:'', stat:''};
+    mapping = {art:'', name:'', miljo:'', stat:'', lev:''};
     buildMapUI();
     $('listNote').textContent = rows.length + ' rader · ' + file.name;
   }catch(err){
@@ -328,7 +356,8 @@ const COLPAT = {
   miljo: [['miljøavgiftsprofil',100],['miljoavgiftsprofil',100],['miljøavgift',95],
           ['miljoavgift',95],['avgiftsprofil',90],['miljø',70],['avgift',65]],
   stat: [['statistikknavn',100],['statistikk',90],['tolltariff',85],['varenrstat',80],
-         ['hskode',75],['hscode',75]]
+         ['hskode',75],['hscode',75]],
+  lev:  [['hovedlev',100],['hovedleverandør',100],['leverandørnr',85],['levnr',80]]
 };
 /* Words that mean a header is a code, not a name. Keeps "Artikkelnummer" out of Artikkel. */
 const NOTNAME = ['nr','nummer','kode','id','profil'];
@@ -361,7 +390,7 @@ function autoMap(headers){
     }
   }
   cand.sort((a,b) => b.score - a.score);
-  const out = {art:'', name:'', miljo:'', stat:''}, used = new Set();
+  const out = {art:'', name:'', miljo:'', stat:'', lev:''}, used = new Set();
   for (const c of cand){
     if (out[c.field] || used.has(c.h)) continue;   // one column per field, one field per column
     out[c.field] = c.h; used.add(c.h);
@@ -374,13 +403,14 @@ function buildMapUI(){
     headers.map(h=>'<option value="'+esc(h).replace(/"/g,'&quot;')+'"'+(h===c?' selected':'')+'>'+
                    esc(colLabel(h))+'</option>').join('');
   const auto = autoMap(headers);
-  for (const f of ['art','name','miljo','stat']){
+  for (const f of ['art','name','miljo','stat','lev']){
     if (!mapping[f] || headers.indexOf(mapping[f]) < 0) mapping[f] = auto[f];
   }
   $('colArt').innerHTML   = opts(mapping.art);
   $('colName').innerHTML  = opts(mapping.name);
   $('colMiljo').innerHTML = opts(mapping.miljo);
   $('colStat').innerHTML  = opts(mapping.stat);
+  $('colLev').innerHTML   = opts(mapping.lev);
   $('mapArea').classList.remove('hide');
   diagnose();
 }
@@ -390,6 +420,7 @@ function readMapUI(){
   mapping.name = $('colName').value;
   mapping.miljo = $('colMiljo').value;
   mapping.stat = $('colStat').value;
+  mapping.lev = $('colLev').value;
   diagnose();
 }
 
@@ -626,6 +657,7 @@ function run(){
         code: mapping.miljo ? String(r[mapping.miljo]||'').trim() : '',
         stat: mapping.miljo ? status(r[mapping.miljo]) : '',
         stk:  mapping.stat  ? String(r[mapping.stat]||'').trim() : '',
+        lev:  mapping.lev   ? String(r[mapping.lev]||'').trim() : '',
         ctx:  ln,
         risky: n.length === 3,
         offline: itemLineSet.size > 0 && !itemLineSet.has(ln) && lead !== n
@@ -656,6 +688,24 @@ function render(){
     '</ul><p style="margin:10px 0 0;font-size:13px">Er dette nye varer som mangler i Excel-lista, '+
     'eller bare frakt og emballasje? Nye varer m\u00e5 legges inn, ellers blir de aldri med i utskriften.</p></div>';
 
+  const unknown = levCodes().filter(c => !levNames[c]);
+  const levHtml = !mapping.lev ? '' : (unknown.length
+    ? '<div class="diag" style="margin-top:14px"><h4>Leverand\u00f8r mangler navn</h4>'+
+      '<p style="margin:0 0 9px;font-size:13px">Skriv inn leverand\u00f8ren for '+
+      (unknown.length === 1 ? 'denne koden' : 'disse kodene')+
+      '. Navnet lagres i denne nettleseren og settes inn i emnefeltet neste gang.</p>'+
+      unknown.map(c =>
+        '<div class="recip-row" style="margin-bottom:6px">'+
+        '<span class="num" style="min-width:70px;padding-top:9px">'+esc(c)+'</span>'+
+        '<input type="text" class="levin" data-code="'+esc(c)+'" placeholder="skriv leverand\u00f8rens navn">'+
+        '<button class="ghost levsave" data-code="'+esc(c)+'">Lagre</button></div>').join('')+
+      '</div>'
+    : '<div class="diag" style="margin-top:14px"><h4>Leverand\u00f8r</h4><ul><li>'+
+      (levName()
+        ? '<strong>'+esc(levName())+'</strong> \u2014 settes inn i emnefeltet'
+        : 'Flere leverand\u00f8rer i samme utvalg ('+levCodes().map(esc).join(', ')+
+          ') \u2014 emnefeltet beholder <code>?</code>')+'</li></ul></div>');
+
   const undoHtml = !nRemoved ? '' :
     '<div class="msg info">'+nRemoved+' rad(er) er fjernet og tas ikke med i utskriften. '+
     '<button class="ghost" id="undoDel" style="padding:4px 10px;margin-left:8px">Angre</button></div>';
@@ -664,7 +714,7 @@ function render(){
     $('resultArea').innerHTML =
       '<div class="empty">'+(nRemoved ? 'Alle radene er fjernet.'
                                       : 'Ingen av varene i listen ble funnet i denne fakturaen.')+'</div>'+
-      undoHtml + missHtml;
+      undoHtml + levHtml + missHtml;
     return;
   }
 
@@ -695,7 +745,7 @@ function render(){
     '<th>Faktura</th><th>Varenummer</th><th>Artikkel</th><th>Milj\u00f8avgift</th>'+
     '<th>Statistikknavn</th><th>Status</th><th>Funnet i denne linjen</th><th></th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
-    undoHtml + missHtml +
+    undoHtml + levHtml + missHtml +
     (nRisky ? '<div class="msg">'+nRisky+' treff er merket <strong>SJEKK</strong>'+
       (nOff ? ' \u2014 '+nOff+' av dem ble funnet p\u00e5 en linje som ikke ser ut som en varelinje '+
               '(f.eks. vekt, sum eller adresse)' : ' fordi varenummeret er kort')+
@@ -805,7 +855,7 @@ async function copy(text){
 /* ---------------- wiring ---------------- */
 wireDrop($('listDrop'), $('listInput'), readList);
 wireDrop($('invDrop'),  $('invInput'),  readInvoices);
-['colArt','colName','colMiljo','colStat'].forEach(id => $(id).addEventListener('change', readMapUI));
+['colArt','colName','colMiljo','colStat','colLev'].forEach(id => $(id).addEventListener('change', readMapUI));
 
 $('saveList').addEventListener('click', async ()=>{
   readMapUI();
@@ -818,7 +868,7 @@ $('saveList').addEventListener('click', async ()=>{
 
 $('clearList').addEventListener('click', async ()=>{
   await store.del('fakturamatch:v2');
-  listRows=[]; headers=[]; mapping={art:'',name:'',miljo:'',stat:''};
+  listRows=[]; headers=[]; mapping={art:'',name:'',miljo:'',stat:'',lev:''};
   $('mapArea').classList.add('hide'); $('diag').innerHTML='';
   $('listNote').textContent='Ingen liste lastet';
   note('listMsg','Lagret vareliste er fjernet.','info');
@@ -847,7 +897,19 @@ $('usePaste').addEventListener('click', ()=>{
   note('invMsg',''); run();
 });
 
-$('resultArea').addEventListener('click', e => {
+$('resultArea').addEventListener('click', async e => {
+  const ls = e.target.closest('.levsave');
+  if (ls){
+    const code = ls.dataset.code;
+    const box = $('resultArea').querySelector('.levin[data-code="'+code+'"]');
+    const val = box ? box.value.trim() : '';
+    if (!val) return;
+    levNames[code] = val;
+    await saveLevNames();
+    toast('Leverand\u00f8r lagret');
+    render();
+    return;
+  }
   const del = e.target.closest('.del');
   if (del){ removedKeys.add(del.dataset.key); render(); return; }
   if (e.target.id === 'undoDel'){ removedKeys = new Set(); render(); }
@@ -885,7 +947,8 @@ $('mailIt').addEventListener('click', async ()=>{
   try{
     const a = document.createElement('a');
     a.href = 'mailto:' + encodeURIComponent(recipient()).replace(/%40/g,'@').replace(/%2C/g,',') +
-             '?subject=' + encodeURIComponent('Fortolling ?, faktura m/p\u00e5tegning (hentes ca ?)');
+             '?subject=' + encodeURIComponent('Fortolling ' + (levName() || '?') +
+             ', faktura m/p\u00e5tegning (hentes ca ?)');
     a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   }catch(e){}
@@ -893,6 +956,7 @@ $('mailIt').addEventListener('click', async ()=>{
 
 store.get(RECIP_KEY).then(r => { if (r && r.value) $('recipient').value = r.value; })
                     .catch(()=>{});
+loadLevNames();
 
 store.get('fakturamatch:v2').then(r=>{
   if (!r) return;
