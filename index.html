@@ -453,6 +453,12 @@ function diagnose(){
   if (tooShort.length)
     li += '<li><strong>'+tooShort.length+'</strong> hoppes over (under 3 tegn, gir falske treff): <code>'+
           esc(uniq(tooShort).join('</code> <code>'))+'</code></li>';
+  const lab = mapping.art ? labelKeys() : new Map();
+  if (lab.size)
+    li += '<li><strong>'+[...lab.values()].reduce((a,b)=>a+b,0)+'</strong> rader hoppes over fordi '+
+          'varenummeret er et merkenavn som deles av flere varer: '+
+          [...lab.entries()].map(([k,c]) => '<code>'+esc(k)+'</code> ('+c+')').join(', ')+
+          '. Disse kan aldri finnes \u2014 legg inn ekte varenumre for \u00e5 f\u00e5 dem med.</li>';
   if (risky.length)
     li += '<li><strong>'+risky.length+'</strong> korte numre blir <em>flagget</em> ved treff, sjekk dem selv: <code>'+
           esc(uniq(risky).join('</code> <code>'))+'</code></li>';
@@ -548,6 +554,22 @@ async function readInvoices(files){
 /* ---------------- matching ---------------- */
 /* Exact token match only. No stitching of adjacent tokens: on real invoices that
    invented ~90 extra number-like strings per page out of prices and discounts. */
+/* A value used on many rows cannot identify a single product — it is a brand or a
+   category label sitting in the article-number column. Searching for it matches every
+   row that carries it, which produces a long, confident, completely wrong list.
+   Real article numbers are unique, so this only ever removes labels. */
+function labelKeys(){
+  const count = new Map(), out = new Map();
+  for (const r of listRows){
+    const n = norm(r[mapping.art]);
+    if (n) count.set(n, (count.get(n) || 0) + 1);
+  }
+  for (const [n, c] of count){
+    if (c > 3 || (c > 1 && !/\d/.test(n))) out.set(n, c);
+  }
+  return out;
+}
+
 /* Invoice lines that look like line items: first token contains a digit and is
    followed by actual words. Narrowed to the region between the column header and
    the totals, which keeps addresses, bank details and dates out. */
@@ -572,11 +594,22 @@ function candidateLines(pages){
     for (let i=start;i<lines.length;i++){ if (STOP.test(lines[i])){ stop = i; break; } }
     for (const l of lines.slice(start, stop)){
       const toks = l.split(/\s+/).filter(Boolean);
-      if (!toks.length) continue;
+      if (toks.length < 3) continue;                       // a wrapped fragment, not a line
+      if (!/[A-Za-zÀ-ÿ]{3,}/.test(toks.slice(1).join(' '))) continue;
       const first = toks[0].replace(/[^A-Za-z0-9]/g,'').toUpperCase();
-    if (!first || !/\d/.test(first) || first.length < 3 || first.length > 12) continue;
-    if (!/[A-Za-zÀ-ÿ]{3,}/.test(toks.slice(1).join(' '))) continue;
-    out.push({key:first, line:l.trim()});
+      if (!first || /^0+$/.test(first)) continue;          // "0.00%" on a VAT summary row
+      let key = null;
+      if (/\d/.test(first) && first.length >= 3 && first.length <= 12){
+        key = first;                                       // the article number leads the line
+      } else if (/^\d{1,3}$/.test(first)){
+        // Some suppliers number their lines and put the barcode further along.
+        for (const x of toks.slice(1)){
+          const n = x.replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+          if (/^\d{8,14}$/.test(n) && !/^0+$/.test(n)){ key = n; break; }
+        }
+      }
+      if (!key) continue;
+      out.push({key:key, line:l.trim()});
       itemLineSet.add(l);
     }
   }
@@ -628,6 +661,7 @@ function run(){
   });
 
   const cands = candidateLines(invoicePages);
+  const labels = labelKeys();
   matches = [];
   const listKeys = new Set();
   for (const r of listRows){ const k = norm(r[mapping.art]); if (k) listKeys.add(k); }
@@ -639,6 +673,7 @@ function run(){
   for (const r of listRows){
     const n = norm(r[mapping.art]);
     if (n.length < 3) continue;
+    if (labels.has(n)) continue;          // merkenavn, ikke et varenummer
     const occ = index.get(n);
     if (!occ) continue;
     // A vare listed twice on the invoice must appear twice. But some suppliers print
@@ -660,13 +695,16 @@ function run(){
         lev:  mapping.lev   ? String(r[mapping.lev]||'').trim() : '',
         ctx:  ln,
         risky: n.length === 3,
-        offline: itemLineSet.size > 0 && !itemLineSet.has(ln) && lead !== n
+        // Only trust the position check when the invoice layout was clearly understood.
+        // On some layouts a single stray line is detected and everything else would
+        // then be flagged; three or more means the line-item area was really found.
+        offline: itemLineSet.size >= 3 && !itemLineSet.has(ln) && lead !== n
       });
     }
   }
   // Sort by fakturanummer, lowest first, then by position within that invoice.
   // Natural order: numeric runs compare as numbers, so 999 comes before 1000, and
-  // labels like "V2027/00123" or "FS 7/MAG/05/2026" still sort sensibly.
+  // labels that mix letters, digits and separators still sort sensibly.
   matches.sort((a,b) => natCmp(a.inv, b.inv) || (a.line - b.line));
   render();
 }
