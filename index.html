@@ -9,7 +9,7 @@
 <style>
   :root{
     --concrete:#E7EAE6; --panel:#FFFFFF; --ink:#14201A; --ink2:#5A6660;
-    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --inf:#2E7D5B; --gp:#6B4C9A; --glass:#D6C6EE; --kvote:#F4D9A0; --warn:#A8412C;
+    --line:#C9D0CA; --hiviz:#C8E600; --slf:#1B4D8F; --inf:#2E7D5B; --gp:#6B4C9A; --glass:#D6C6EE; --kvote:#FFE14D; --warn:#A8412C;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
   }
@@ -92,7 +92,7 @@
   .chip.inf{background:var(--inf)}
   .chip.gp{background:var(--gp)}
   .chip.glass{background:var(--glass);color:#3B2A61}
-  .chip.kvote{background:var(--kvote);color:#5C3F06}
+  .chip.kvote{background:var(--kvote);color:#4A3A00}
   .chip.none{background:transparent;color:var(--ink2);border:1px solid var(--line);font-weight:400}
   .flag{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;
         background:#E8A33D;color:#3A2A08;padding:1px 5px;margin-left:6px;letter-spacing:.06em}
@@ -832,7 +832,7 @@ function asHtmlTable(){
   /* Light fills with dark text for the two newer codes, so the label stays readable. */
   const FILL = {'SLF':['#1b4d8f','#ffffff','SLF'], 'INF':['#2e7d5b','#ffffff','INF'],
                 'GP':['#6b4c9a','#ffffff','GP'],   'GP-Glass':['#d6c6ee','#3b2a61','GP-GLASS'],
-                'Kvote':['#f4d9a0','#5c3f06','KVOTE']};
+                'Kvote':['#ffe14d','#4a3a00','KVOTE']};
   const stat = (m, extra) => {
     const f = FILL[m.stat];
     return f
