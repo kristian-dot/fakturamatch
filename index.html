@@ -576,7 +576,7 @@ function labelKeys(){
 // Header of the line-item table. Either an explicit article-number column, or the
 // generic shape of one: a description column and a quantity column on the same line.
 // Some layouts head that column only "No.", which no keyword list would catch.
-const DESC = 'description|denomination|beskrivelse|varetekst|artikkel';
+const DESC = 'description|denomination|beskrivelse|varetekst|artikkel|article';
 const QTY  = 'quantity|qty|antall|delivered|levert';
 const HDR  = new RegExp('(article\\s*no|varenr|art\\.?\\s*nr|artikkelnr)|((' + DESC +
                         ').*(' + QTY + ')|(' + QTY + ').*(' + DESC + '))', 'i');
@@ -598,6 +598,7 @@ function candidateLines(pages){
       if (!/[A-Za-zÀ-ÿ]{3,}/.test(toks.slice(1).join(' '))) continue;
       const first = toks[0].replace(/[^A-Za-z0-9]/g,'').toUpperCase();
       if (!first || /^0+$/.test(first)) continue;          // "0.00%" on a VAT summary row
+      if (/^\d+[A-Z]+$/.test(first)) continue;             // "200G", "50G" from a wrapped description
       let key = null;
       if (/\d/.test(first) && first.length >= 3 && first.length <= 12){
         key = first;                                       // the article number leads the line
@@ -706,6 +707,15 @@ function run(){
   // Natural order: numeric runs compare as numbers, so 999 comes before 1000, and
   // labels that mix letters, digits and separators still sort sensibly.
   matches.sort((a,b) => natCmp(a.inv, b.inv) || (a.line - b.line));
+  // Two rows in the vareliste can share one varenummer and match the same invoice
+  // line. Without this they get the same identity, and deleting one deletes both.
+  const seenRow = new Map();
+  for (const m of matches){
+    const base = m.inv + '\u0001' + m.art + '\u0001' + m.line;
+    const n = seenRow.get(base) || 0;
+    seenRow.set(base, n + 1);
+    m.dup = n;
+  }
   render();
 }
 
@@ -791,7 +801,7 @@ function render(){
 }
 
 /* ---------------- output ---------------- */
-const rowKey = m => m.inv + '\u0001' + m.art + '\u0001' + m.line;
+const rowKey = m => m.inv + '\u0001' + m.art + '\u0001' + m.line + '\u0001' + (m.dup || 0);
 const visible = () => matches.filter(m => !removedKeys.has(rowKey(m)));
 const HEAD = ['Faktura','Varenummer','Artikkel','Miljøavgift','Statistikknavn','Status'];
 const dateNO = () => new Date().toLocaleDateString('nb-NO',
