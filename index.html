@@ -146,6 +146,7 @@
           <div><label for="colName">Artikkel</label><select id="colName"></select></div>
           <div><label for="colMiljo">Miljøavgiftsprofil</label><select id="colMiljo"></select></div>
           <div><label for="colStat">Statistikknavn</label><select id="colStat"></select></div>
+          <div><label for="colVekt">Nettovekt (per enhet)</label><select id="colVekt"></select></div>
           <div><label for="colLev">Hovedlev. (valgfri — gir leverandør i emnefeltet)</label><select id="colLev"></select></div>
         </div>
         <div id="diag"></div>
@@ -213,12 +214,25 @@
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-let listRows = [], headers = [], mapping = {art:'', name:'', miljo:'', stat:'', lev:''};
+let listRows = [], headers = [], mapping = {art:'', name:'', miljo:'', stat:'', vekt:'', lev:''};
 let invoiceLines = [], invoiceLineSrc = [], invoicePages = [], invoiceSources = [], matches = [], unmatched = [];
 let removedKeys = new Set();
 
 const $ = id => document.getElementById(id);
 const norm = s => String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+/* Nettovekt from the list, always to three decimals with a Norwegian comma, so the
+   column can be summed in Excel. A blank or a zero means the list has no weight for
+   that vare — show it as empty so the gap is visible, never as "0,000".
+   A value that is not a number is passed through untouched rather than silently
+   turned into 0,000: an odd weight in the list should stay visible. */
+const wt = v => {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return '';
+  const num = Number(t.replace(/\s/g,'').replace(',', '.'));
+  if (!isFinite(num)) return t;
+  if (num === 0) return '';
+  return num.toFixed(3).replace('.', ',');
+};
 const esc = s => String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 function toast(t){
@@ -295,7 +309,8 @@ async function saveRecipient(){
 }
 
 async function save(){
-  const cols = [mapping.art, mapping.name, mapping.miljo, mapping.stat, mapping.lev].filter(Boolean);
+  const cols = [mapping.art, mapping.name, mapping.miljo, mapping.stat, mapping.vekt,
+                mapping.lev].filter(Boolean);
   const slim = listRows.map(r => { const o={}; cols.forEach(c => o[c]=r[c]); return o; });
   return await store.set('fakturamatch:v2', JSON.stringify({headers, mapping, rows:slim}));
 }
@@ -328,7 +343,7 @@ async function readList(files){
     // so a column with data but no heading can still be chosen.
     headers = Object.keys(rows[0]).filter(h =>
       !EMPTYCOL.test(h) || rows.some(r => String(r[h] == null ? '' : r[h]).trim() !== ''));
-    mapping = {art:'', name:'', miljo:'', stat:'', lev:''};
+    mapping = {art:'', name:'', miljo:'', stat:'', vekt:'', lev:''};
     buildMapUI();
     $('listNote').textContent = rows.length + ' rader · ' + file.name;
   }catch(err){
@@ -357,6 +372,8 @@ const COLPAT = {
           ['miljoavgift',95],['avgiftsprofil',90],['miljø',70],['avgift',65]],
   stat: [['statistikknavn',100],['statistikk',90],['tolltariff',85],['varenrstat',80],
          ['hskode',75],['hscode',75]],
+  vekt: [['artvekt',100],['nettovekt',100],['nettvekt',95],['varevekt',90],
+          ['vekt',55],['netweight',55],['weight',50]],
   lev:  [['hovedlev',100],['hovedleverandør',100],['leverandørnr',85],['levnr',80]]
 };
 /* Words that mean a header is a code, not a name. Keeps "Artikkelnummer" out of Artikkel. */
@@ -390,7 +407,7 @@ function autoMap(headers){
     }
   }
   cand.sort((a,b) => b.score - a.score);
-  const out = {art:'', name:'', miljo:'', stat:'', lev:''}, used = new Set();
+  const out = {art:'', name:'', miljo:'', stat:'', vekt:'', lev:''}, used = new Set();
   for (const c of cand){
     if (out[c.field] || used.has(c.h)) continue;   // one column per field, one field per column
     out[c.field] = c.h; used.add(c.h);
@@ -403,13 +420,14 @@ function buildMapUI(){
     headers.map(h=>'<option value="'+esc(h).replace(/"/g,'&quot;')+'"'+(h===c?' selected':'')+'>'+
                    esc(colLabel(h))+'</option>').join('');
   const auto = autoMap(headers);
-  for (const f of ['art','name','miljo','stat','lev']){
+  for (const f of ['art','name','miljo','stat','vekt','lev']){
     if (!mapping[f] || headers.indexOf(mapping[f]) < 0) mapping[f] = auto[f];
   }
   $('colArt').innerHTML   = opts(mapping.art);
   $('colName').innerHTML  = opts(mapping.name);
   $('colMiljo').innerHTML = opts(mapping.miljo);
   $('colStat').innerHTML  = opts(mapping.stat);
+  $('colVekt').innerHTML  = opts(mapping.vekt);
   $('colLev').innerHTML   = opts(mapping.lev);
   $('mapArea').classList.remove('hide');
   diagnose();
@@ -420,9 +438,13 @@ function readMapUI(){
   mapping.name = $('colName').value;
   mapping.miljo = $('colMiljo').value;
   mapping.stat = $('colStat').value;
+  mapping.vekt = $('colVekt').value;
   mapping.lev = $('colLev').value;
   diagnose();
 }
+
+const LBL = {art:'Varenummer', name:'Artikkel', miljo:'Miljøavgift',
+             stat:'Statistikknavn', vekt:'Nettovekt', lev:'Hovedlev.'};
 
 /* Report what in the list can and cannot be matched, before anything is run. */
 function diagnose(){
@@ -439,8 +461,8 @@ function diagnose(){
     else if (st === 'GP') gp++; else if (st) other++;
   }
   const uniq = a => [...new Set(a)];
-  const LBL = {art:'Varenummer', name:'Artikkel', miljo:'Miljøavgift', stat:'Statistikknavn'};
-  const picked = ['art','name','miljo','stat']
+
+  const picked = ['art','name','miljo','stat','vekt']
     .map(f => mapping[f]
       ? '<li>'+LBL[f]+' \u2190 <code>'+esc(colLabel(mapping[f]))+'</code></li>'
       : '<li style="color:#A8412C">'+LBL[f]+' \u2190 <strong>ikke funnet</strong> \u2014 velg kolonnen selv over</li>')
@@ -450,6 +472,13 @@ function diagnose(){
   if (blank.length)
     li += '<li><strong>'+blank.length+'</strong> uten varenummer — disse kan <em>aldri</em> bli funnet: '+
           esc(uniq(blank).slice(0,8).join(', '))+(blank.length>8?' …':'')+'</li>';
+  if (mapping.vekt){
+    const noWt = listRows.filter(r => !wt(r[mapping.vekt])).length;
+    if (noWt)
+      li += '<li><strong>'+noWt+'</strong> '+(noWt===1?'vare':'varer')+
+            ' mangler nettovekt i listen \u2014 '+(noWt===1?'den f\u00e5r':'de f\u00e5r')+
+            ' tom vektkolonne i utskriften</li>';
+  }
   if (tooShort.length)
     li += '<li><strong>'+tooShort.length+'</strong> hoppes over (under 3 tegn, gir falske treff): <code>'+
           esc(uniq(tooShort).join('</code> <code>'))+'</code></li>';
@@ -671,7 +700,8 @@ function run(){
     if (listKeys.has(c.key) || seenMiss.has(c.key)) return false;
     seenMiss.add(c.key); return true;
   });
-  for (const r of listRows){
+  for (let ri = 0; ri < listRows.length; ri++){
+    const r = listRows[ri];
     const n = norm(r[mapping.art]);
     if (n.length < 3) continue;
     if (labels.has(n)) continue;          // merkenavn, ikke et varenummer
@@ -687,12 +717,14 @@ function run(){
       const lead = norm((ln.split(/\s+/)[0]) || '');
       matches.push({
         line: li,
+        src:  ri,                          // which row of the vareliste this came from
         inv:  invoiceLineSrc[li] || '',
         art:  r[mapping.art],
         name: mapping.name  ? r[mapping.name]  : '',
         code: mapping.miljo ? String(r[mapping.miljo]||'').trim() : '',
         stat: mapping.miljo ? status(r[mapping.miljo]) : '',
         stk:  mapping.stat  ? String(r[mapping.stat]||'').trim() : '',
+        vekt: mapping.vekt  ? wt(r[mapping.vekt]) : '',
         lev:  mapping.lev   ? String(r[mapping.lev]||'').trim() : '',
         ctx:  ln,
         risky: n.length === 3,
@@ -722,6 +754,7 @@ function run(){
 function render(){
   const vis = visible();
   const nRemoved = matches.length - vis.length;
+  markAmbig(vis);            // depends on what is still on screen, so recompute here
 
   $('hitCount').textContent = vis.length;
   $('hitLabel').textContent = vis.length === 1 ? 'vare funnet' : 'varer funnet';
@@ -774,26 +807,36 @@ function render(){
                   : '<span class="chip none">\u2013</span>';
 
   const rows = vis.map(m =>
-    '<tr class="'+((m.risky||m.offline)?'risky':'')+'">'+
+    '<tr class="'+(flagged(m)?'risky':'')+'">'+
     '<td class="num">'+esc(m.inv)+'</td>'+
-    '<td class="num">'+esc(m.art)+((m.risky||m.offline)?'<span class="flag">SJEKK</span>':'')+'</td>'+
+    '<td class="num">'+esc(m.art)+(flagged(m)?'<span class="flag">SJEKK</span>':'')+'</td>'+
     '<td>'+esc(m.name)+'</td>'+
     '<td class="num">'+esc(m.code)+'</td>'+
     '<td class="num">'+esc(m.stk)+'</td>'+
     '<td>'+chip(m)+'</td>'+
+    '<td class="num">'+(m.vekt ? esc(m.vekt) : '\u2013')+'</td>'+
     '<td class="ctx" title="'+esc(m.ctx)+'">'+esc(m.ctx)+'</td>'+
     '<td><button class="del" data-key="'+esc(rowKey(m))+'" title="Fjern denne raden">&times;</button></td>'+
     '</tr>').join('');
 
   const nRisky = vis.filter(m=>m.risky||m.offline).length;
   const nOff   = vis.filter(m=>m.offline).length;
+  const nAmb   = vis.filter(m=>m.ambig).length;
+  // Distinct varenumre involved, which is what the reader counts on screen.
+  const ambArt = [...new Set(vis.filter(m=>m.ambig).map(m=>m.art))];
 
   $('resultArea').innerHTML =
     '<div class="tablescroll"><table><thead><tr>'+
     '<th>Faktura</th><th>Varenummer</th><th>Artikkel</th><th>Milj\u00f8avgift</th>'+
-    '<th>Statistikknavn</th><th>Status</th><th>Funnet i denne linjen</th><th></th>'+
+    '<th>Statistikknavn</th><th>Status</th><th>Nettovekt</th>'+
+    '<th>Funnet i denne linjen</th><th></th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     undoHtml + levHtml + missHtml +
+    (nAmb ? '<div class="msg">'+ambArt.map(a=>'<strong>'+esc(a)+'</strong>').join(', ')+
+      (ambArt.length === 1 ? ' st\u00e5r p\u00e5 flere varer i varelisten'
+                           : ' st\u00e5r p\u00e5 flere varer hver i varelisten')+
+      ', s\u00e5 '+nAmb+' rader er merket <strong>SJEKK</strong>. Bare \u00e9n av dem er '+
+      'levert \u2014 sammenlign med fakturaen og slett de andre f\u00f8r utsending.</div>' : '')+
     (nRisky ? '<div class="msg">'+nRisky+' treff er merket <strong>SJEKK</strong>'+
       (nOff ? ' \u2014 '+nOff+' av dem ble funnet p\u00e5 en linje som ikke ser ut som en varelinje '+
               '(f.eks. vekt, sum eller adresse)' : ' fordi varenummeret er kort')+
@@ -802,8 +845,26 @@ function render(){
 
 /* ---------------- output ---------------- */
 const rowKey = m => m.inv + '\u0001' + m.art + '\u0001' + m.line + '\u0001' + (m.dup || 0);
+/* Every reason a row needs a human look, in one place. */
+const flagged = m => m.risky || m.offline || m.ambig;
+
+/* One varenummer, two different varer in the vareliste: both get printed, but only one
+   was delivered, and picking the wrong one can change both tolltariff and status.
+   Worked out from the rows still on screen, so deleting the wrong one clears the flag
+   on the one that remains. The same vare delivered twice shares a list row and is
+   therefore never flagged. */
+function markAmbig(list){
+  const by = new Map();
+  for (const m of list){
+    const k = m.inv + '\u0001' + m.art;
+    if (!by.has(k)) by.set(k, new Set());
+    by.get(k).add(m.src);
+  }
+  for (const m of list) m.ambig = by.get(m.inv + '\u0001' + m.art).size > 1;
+}
 const visible = () => matches.filter(m => !removedKeys.has(rowKey(m)));
-const HEAD = ['Faktura','Varenummer','Artikkel','Miljøavgift','Statistikknavn','Status'];
+const HEAD = ['Faktura','Varenummer','Artikkel','Miljøavgift','Statistikknavn',
+              'Status','Nettovekt'];
 const dateNO = () => new Date().toLocaleDateString('nb-NO',
       {day:'2-digit', month:'2-digit', year:'numeric'});
 const invLabel = () => {
@@ -813,11 +874,12 @@ const invLabel = () => {
        : n + ' fakturaer';
 };
 const headerLine = () => invLabel();
-const asTab  = () => [HEAD.join('\t'), ...visible().map(m=>[m.inv,m.art,m.name,m.code,m.stk,m.stat||'-'].join('\t'))].join('\n');
+const asTab  = () => [HEAD.join('\t'), ...visible().map(m=>[m.inv,m.art,m.name,m.code,m.stk,m.stat||'-',m.vekt].join('\t'))].join('\n');
 const asText = () => {
   const vis = visible();
   return headerLine() + '\n\n' + vis.map((m, i) => {
-    const row = m.inv+' | '+m.art+' | '+m.name+' | '+(m.stk||'-')+' | '+(m.stat||'-');
+    const row = m.inv+' | '+m.art+' | '+m.name+' | '+(m.stk||'-')+
+                ' | '+(m.stat||'-')+' | '+(m.vekt||'-');
     const lastOfInvoice = (i === vis.length - 1) || vis[i+1].inv !== m.inv;
     return row + (lastOfInvoice ? '\n' : '');
   }).join('\n');
@@ -852,7 +914,8 @@ function asHtmlTable(){
   };
 
   // Miljøavgift is left out on purpose: Status already says what it means.
-  const head = ['Faktura','Varenummer','Artikkel','Statistikknavn','Status'].map(th).join('');
+  const head = ['Faktura','Varenummer','Artikkel','Statistikknavn','Status','Nettovekt']
+                 .map(th).join('');
 
   const vis = visible();
   const rows = vis.map((m, i) => {
@@ -866,10 +929,11 @@ function asHtmlTable(){
       td(m.art, 1, edge)+
       td(m.name, 0, edge)+
       td(m.stk, 1, edge)+
-      stat(m, edge+';border-right:'+K)+'</tr>';
+      stat(m, edge)+
+      td(m.vekt || '\u2013', 1, edge+';border-right:'+K+';text-align:right')+'</tr>';
     // Light grey box, same weight as the grid lines: clearly a row you can write in,
     // without competing with the black frame around the invoice above it.
-    const gap = '<tr><td colspan="5" style="border:'+B+';background:#ffffff;color:#14201a;'+
+    const gap = '<tr><td colspan="6" style="border:'+B+';background:#ffffff;color:#14201a;'+
                 'padding:10px 9px;font-size:13px">&nbsp;</td></tr>';
     return row + (lastOfInv ? gap : '');
   }).join('');
@@ -903,7 +967,7 @@ async function copy(text){
 /* ---------------- wiring ---------------- */
 wireDrop($('listDrop'), $('listInput'), readList);
 wireDrop($('invDrop'),  $('invInput'),  readInvoices);
-['colArt','colName','colMiljo','colStat','colLev'].forEach(id => $(id).addEventListener('change', readMapUI));
+['colArt','colName','colMiljo','colStat','colVekt','colLev'].forEach(id => $(id).addEventListener('change', readMapUI));
 
 $('saveList').addEventListener('click', async ()=>{
   readMapUI();
@@ -916,7 +980,7 @@ $('saveList').addEventListener('click', async ()=>{
 
 $('clearList').addEventListener('click', async ()=>{
   await store.del('fakturamatch:v2');
-  listRows=[]; headers=[]; mapping={art:'',name:'',miljo:'',stat:'',lev:''};
+  listRows=[]; headers=[]; mapping={art:'',name:'',miljo:'',stat:'',vekt:'',lev:''};
   $('mapArea').classList.add('hide'); $('diag').innerHTML='';
   $('listNote').textContent='Ingen liste lastet';
   note('listMsg','Lagret vareliste er fjernet.','info');
@@ -978,19 +1042,20 @@ $('recipient').addEventListener('keydown', e => { if (e.key === 'Enter') $('save
 $('copyTab').addEventListener('click', ()=>copy(asTab()));
 $('copyText').addEventListener('click', ()=>copy(asText()));
 $('mailIt').addEventListener('click', async ()=>{
-  const flagged = visible().filter(m=>m.risky||m.offline).length;
+  // Same test as the table, so nothing marked SJEKK on screen goes out unmentioned.
+  const nFlag = visible().filter(flagged).length;
   const ok = await copyRich(asHtmlTable(), asText());
   if (!ok) await copy(asText());
   toast(ok ? 'Tabell kopiert' : 'Kopiert som tekst');
 
-  const warn = flagged
-    ? '<strong>Merk:</strong> '+flagged+' rad(er) er merket SJEKK og er fortsatt med. '+
+  const warn = nFlag
+    ? '<strong>Merk:</strong> '+nFlag+' rad(er) er merket SJEKK og er fortsatt med. '+
       'Fjern dem med \u00d7 f\u00f8r du sender, hvis de ikke skal v\u00e6re der. '
     : '';
   note('invMsg', warn + (ok
     ? 'Tabellen er kopiert. Lim den inn i e-posten med Ctrl+V.'
     : 'Nettleseren st\u00f8tter ikke formatert kopiering, s\u00e5 listen er kopiert som ren tekst.'),
-    flagged ? '' : 'info');
+    nFlag ? '' : 'info');
 
   try{
     const a = document.createElement('a');
@@ -1012,8 +1077,20 @@ store.get('fakturamatch:v2').then(r=>{
     const d = JSON.parse(r.value);
     headers=d.headers; mapping=d.mapping; listRows=d.rows;
     buildMapUI();
+    // The saved rows only carry the columns that were mapped at save time. Any column
+    // auto-detected now against the saved headers would silently come out blank.
+    const missing = !listRows.length ? [] :
+      ['art','name','miljo','stat','vekt','lev'].filter(f =>
+        mapping[f] && !listRows.some(r2 => Object.prototype.hasOwnProperty.call(r2, mapping[f])));
+    for (const f of missing) mapping[f] = '';
+    if (missing.length) buildMapUI();
     $('listNote').textContent = listRows.length + ' rader · lagret liste';
-    note('listMsg','Lagret vareliste hentet inn. Slipp inn en ny fil for å oppdatere den.','info');
+    note('listMsg', missing.length
+      ? 'Lagret vareliste hentet inn, men den ble lagret før '+
+        missing.map(f => LBL[f] || f).join(' og ')+
+        ' kom til. Slipp inn Excel-fila på nytt og trykk «Lagre vareliste», '+
+        'ellers står kolonnen tom.'
+      : 'Lagret vareliste hentet inn. Slipp inn en ny fil for å oppdatere den.','info');
   }catch(e){}
 });
 </script>
